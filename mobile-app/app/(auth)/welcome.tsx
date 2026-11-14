@@ -1,93 +1,152 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  Dimensions,
+  Animated,
+  FlatList,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../../constants/colors';
 
-const { height } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+
+// One background, one accent, one text color.
+const BG = '#FFFBF2';
+const ACCENT = '#FFCC00';
+const INK = '#2B1B0E';
+const MUTED = '#8A7B6D';
+
+type Slide = {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+  useLogo?: boolean;
+};
+
+const SLIDES: Slide[] = [
+  {
+    id: '1',
+    title: 'Your favorite meals,\ndelivered fast.',
+    subtitle: 'Quick delivery from your favorite local restaurants, straight to your door.',
+    useLogo: true,
+  },
+  {
+    id: '2',
+    title: 'Track every order\nin real time.',
+    subtitle: 'Follow your driver from the kitchen to your door.',
+    icon: 'location-outline',
+  },
+  {
+    id: '3',
+    title: 'Local favorites,\nall in one place.',
+    subtitle: 'Browse menus and reorder your go-to meals in a few taps.',
+    icon: 'restaurant-outline',
+  },
+];
+
+const ART_SIZE = Math.min(width * 0.7, 280);
 
 export default function WelcomeScreen() {
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const [index, setIndex] = useState(0);
+  const listRef = useRef<FlatList<Slide>>(null);
+
+  const onMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setIndex(Math.round(e.nativeEvent.contentOffset.x / width));
+  };
+
+  const skipToEnd = () => {
+    listRef.current?.scrollToIndex({ index: SLIDES.length - 1, animated: true });
+  };
+
+  const renderSlide = ({ item }: { item: Slide }) => (
+    <View style={styles.slide}>
+      <View style={styles.art}>
+        {item.useLogo ? (
+          <Image
+            source={require('../../assets/images/logo-fit.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        ) : (
+          <View style={styles.iconCircle}>
+            <Ionicons name={item.icon!} size={84} color={INK} />
+          </View>
+        )}
+      </View>
+
+      <Text style={styles.title}>{item.title}</Text>
+      <Text style={styles.subtitle}>{item.subtitle}</Text>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView 
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.logoContainer}>
-          <View style={styles.logoCircle}>
-            <Ionicons name="fast-food" size={80} color={colors.primary} />
-          </View>
-          <Text style={styles.title}>HappyDeliveries</Text>
-          <Text style={styles.subtitle}>
-            Food delivery at your fingertips
-          </Text>
-        </View>
-        
-        <View style={styles.roleSelection}>
-          <Text style={styles.roleTitle}>Join as:</Text>
-          
-          <Link href="/(auth)/register?role=customer" asChild>
-            <TouchableOpacity style={styles.roleCard}>
-              <View style={styles.roleIcon}>
-                <Ionicons name="person" size={28} color={colors.primary} />
-              </View>
-              <View style={styles.roleInfo}>
-                <Text style={styles.roleName}>Customer</Text>
-                <Text style={styles.roleDescription}>
-                  Order food from your favorite restaurants
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={24} color={colors.gray400} />
-            </TouchableOpacity>
-          </Link>
-          
-          <Link href="/(auth)/register?role=driver" asChild>
-            <TouchableOpacity style={styles.roleCard}>
-              <View style={styles.roleIcon}>
-                <Ionicons name="car" size={28} color={colors.primary} />
-              </View>
-              <View style={styles.roleInfo}>
-                <Text style={styles.roleName}>Driver</Text>
-                <Text style={styles.roleDescription}>
-                  Deliver orders and earn money
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={24} color={colors.gray400} />
-            </TouchableOpacity>
-          </Link>
-          
-          <Link href="/(auth)/register?role=restaurant_manager" asChild>
-            <TouchableOpacity style={styles.roleCard}>
-              <View style={styles.roleIcon}>
-                <Ionicons name="restaurant" size={28} color={colors.primary} />
-              </View>
-              <View style={styles.roleInfo}>
-                <Text style={styles.roleName}>Restaurant Manager</Text>
-                <Text style={styles.roleDescription}>
-                  Manage your restaurant and menus
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={24} color={colors.gray400} />
-            </TouchableOpacity>
-          </Link>
-        </View>
-        
-        <View style={styles.bottomSection}>
-          <Text style={styles.loginText}>Already have an account?</Text>
-          <Link href="/(auth)/login" asChild>
-            <TouchableOpacity style={styles.loginButton}>
-              <Text style={styles.loginButtonText}>Sign In</Text>
-            </TouchableOpacity>
-          </Link>
-          
-          <Link href="/(customer)/home" asChild>
-            <TouchableOpacity style={styles.guestButton}>
-              <Text style={styles.guestButtonText}>Continue as Guest</Text>
-            </TouchableOpacity>
-          </Link>
-        </View>
-      </ScrollView>
+      <View style={styles.topBar}>
+        {index < SLIDES.length - 1 ? (
+          <TouchableOpacity onPress={skipToEnd} hitSlop={12}>
+            <Text style={styles.skipText}>Skip</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      <Animated.FlatList
+        ref={listRef as any}
+        data={SLIDES}
+        keyExtractor={(item) => item.id}
+        renderItem={renderSlide}
+        horizontal
+        pagingEnabled
+        bounces={false}
+        showsHorizontalScrollIndicator={false}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
+          useNativeDriver: false,
+        })}
+        scrollEventThrottle={16}
+        onMomentumScrollEnd={onMomentumEnd}
+        style={styles.carousel}
+      />
+
+      <View style={styles.dots}>
+        {SLIDES.map((_, i) => {
+          const inputRange = [(i - 1) * width, i * width, (i + 1) * width];
+          const dotWidth = scrollX.interpolate({
+            inputRange,
+            outputRange: [8, 24, 8],
+            extrapolate: 'clamp',
+          });
+          const opacity = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.25, 1, 0.25],
+            extrapolate: 'clamp',
+          });
+          return <Animated.View key={i} style={[styles.dot, { width: dotWidth, opacity }]} />;
+        })}
+      </View>
+
+      <View style={styles.bottom}>
+        <Link href="/(auth)/register?role=customer" asChild>
+          <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85}>
+            <Text style={styles.primaryText}>Get Started</Text>
+          </TouchableOpacity>
+        </Link>
+
+        <Link href="/(auth)/login" asChild>
+          <TouchableOpacity style={styles.signIn} activeOpacity={0.7}>
+            <Text style={styles.signInText}>
+              Already have an account? <Text style={styles.signInLink}>Sign in</Text>
+            </Text>
+          </TouchableOpacity>
+        </Link>
+      </View>
     </SafeAreaView>
   );
 }
@@ -95,117 +154,103 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: BG,
   },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 20,
-    justifyContent: 'center', // Centers content vertically if screen is tall
-    paddingBottom: 40, // Adds breathing room at the bottom for scrolling
-  },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: height * 0.04, // Responsive margin (approx 4% of screen height)
-    marginTop: height * 0.02,
-  },
-  logoCircle: {
-    width: 100, // Slightly smaller to be safer on small screens
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: colors.primary + '20',
+  topBar: {
+    height: 44,
+    paddingHorizontal: 28,
+    alignItems: 'flex-end',
     justifyContent: 'center',
+  },
+  skipText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: MUTED,
+  },
+  carousel: {
+    flexGrow: 1,
+  },
+  slide: {
+    width,
+    paddingHorizontal: 32,
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'center',
+  },
+  art: {
+    width: ART_SIZE,
+    height: ART_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: height * 0.04,
+    maxHeight: height * 0.34,
+  },
+  logo: {
+    width: '100%',
+    height: '100%',
+  },
+  iconCircle: {
+    width: '70%',
+    height: '70%',
+    borderRadius: 999,
+    backgroundColor: ACCENT + '40',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
-    fontSize: 28, // Slightly reduced from 32 to prevent wrapping on narrow screens
-    fontWeight: 'bold',
-    color: colors.primary,
-    marginBottom: 8,
+    fontSize: 30,
+    fontWeight: '800',
+    color: INK,
+    textAlign: 'center',
+    lineHeight: 37,
+    letterSpacing: -0.5,
+    marginBottom: 12,
   },
   subtitle: {
     fontSize: 16,
-    color: colors.gray600,
+    color: MUTED,
     textAlign: 'center',
+    lineHeight: 24,
+    paddingHorizontal: 8,
   },
-  roleSelection: {
-    marginBottom: height * 0.04,
-  },
-  roleTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.gray700,
-    marginBottom: 12,
-  },
-  roleCard: {
+  dots: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.gray50,
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.gray200,
-  },
-  roleIcon: {
-    width: 44, // Slightly smaller
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#fff',
     justifyContent: 'center',
+    gap: 6,
+    marginVertical: 20,
+  },
+  dot: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: INK,
+  },
+  bottom: {
+    paddingHorizontal: 28,
+    paddingBottom: 12,
     alignItems: 'center',
-    marginRight: 14,
-    borderWidth: 1,
-    borderColor: colors.gray200,
   },
-  roleInfo: {
-    flex: 1,
-  },
-  roleName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginBottom: 2,
-  },
-  roleDescription: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 18,
-  },
-  bottomSection: {
+  primaryButton: {
+    width: '100%',
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: ACCENT,
     alignItems: 'center',
-    marginTop: 'auto', // Pushes to bottom if there is space left
+    justifyContent: 'center',
   },
-  loginText: {
+  primaryText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: INK,
+  },
+  signIn: {
+    paddingVertical: 16,
+  },
+  signInText: {
     fontSize: 15,
-    color: colors.gray600,
-    marginBottom: 12,
+    color: MUTED,
   },
-  loginButton: {
-    width: '100%',
-    backgroundColor: colors.primary,
-    padding: 16, // Reduced slightly for better fit
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  loginButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  guestButton: {
-    width: '100%',
-    backgroundColor: 'transparent',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  guestButtonText: {
-    color: colors.primary,
-    fontSize: 16,
-    fontWeight: '600',
+  signInLink: {
+    color: INK,
+    fontWeight: '700',
   },
 });

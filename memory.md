@@ -1,0 +1,2 @@
+- [User Payment Implementation Intent](memory/user_payment_intent.md) - User wants to finish payment implementation where they left off
+- [Project Payment Implementation Findings](memory/project_payment_implementation.md) - Analysis of payment system and what was completed

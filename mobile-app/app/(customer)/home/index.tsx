@@ -30,12 +30,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 // --- THEME ---
 const THEME = {
-  primary: '#FF6B35',
+  primary: '#FFCC00',
   primaryLight: 'rgba(255, 107, 53, 0.1)',
   secondary: '#1A1A1A',
   success: '#00C896',
   warning: '#FFD166',
-  background: '#F8F9FA',
+  background: '#FFFBF2',
   card: '#FFFFFF',
   textLight: '#8E8E93',
   border: '#E5E5E5',
@@ -839,7 +839,7 @@ export default function CustomerHomeScreen() {
             />
           </View>
         )}
-        
+
         {/* Popular Menu Items */}
         {discounts.length > 0 && (
           <View style={styles.section}>

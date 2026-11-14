@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { forwardRef, useMemo, useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,699 +7,750 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
+  ActivityIndicator,
+  TextInput,
+  TextInputProps,
+  ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import Input from '../../components/common/Input';
-import Button from '../../components/common/Button';
 import { useAuth } from '../../hooks/useAuth';
-import { colors } from '../../constants/colors';
+
+// ─── Palette (same as Welcome) ──────────────────────────────────────────────
+const BG = '#FFFBF2';
+const ACCENT = '#FFCC00';
+const INK = '#2B1B0E';
+const MUTED = '#8A7B6D';
+const LINE = '#E6DDCF';
+const PLACEHOLDER = '#B5A99B';
+const ERROR = '#C0392B';
+const ERROR_BG = '#FDECEA';
+const GOOD = '#2E9E5B';
 
 type UserRole = 'customer' | 'driver' | 'restaurant_manager';
+
+type FieldKey =
+  | 'firstName'
+  | 'lastName'
+  | 'email'
+  | 'phone'
+  | 'password'
+  | 'driverLicense'
+  | 'vehicleType'
+  | 'vehicleModel'
+  | 'vehicleColor'
+  | 'vehicleRegistration'
+  | 'restaurantName'
+  | 'restaurantAddress';
+
+type Values = Record<FieldKey, string>;
+
+const ACCOUNT_FIELDS: FieldKey[] = ['firstName', 'lastName', 'email', 'phone', 'password'];
+const DRIVER_FIELDS: FieldKey[] = [
+  'driverLicense',
+  'vehicleType',
+  'vehicleModel',
+  'vehicleColor',
+  'vehicleRegistration',
+];
+const MANAGER_FIELDS: FieldKey[] = ['restaurantName', 'restaurantAddress'];
+
+const INITIAL_VALUES: Values = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  password: '',
+  driverLicense: '',
+  vehicleType: '',
+  vehicleModel: '',
+  vehicleColor: '',
+  vehicleRegistration: '',
+  restaurantName: '',
+  restaurantAddress: '',
+};
+
+// ─── Validation helpers ─────────────────────────────────────────────────────
+
+/**
+ * Normalises a phone number to international format.
+ * Local South African numbers (0XXXXXXXXX) become +27XXXXXXXXX.
+ * Returns null when the number is not plausible (9–15 digits).
+ */
+function normalizePhone(raw: string): string | null {
+  const trimmed = raw.trim();
+  const hasPlus = trimmed.startsWith('+');
+  let digits = trimmed.replace(/\D/g, '');
+  if (!hasPlus && digits.startsWith('0') && digits.length === 10) {
+    digits = '27' + digits.slice(1);
+  }
+  if (digits.length < 9 || digits.length > 15) return null;
+  return '+' + digits;
+}
+
+const required = (message: string) => (v: string) => (v.trim() ? '' : message);
+
+const VALIDATORS: Record<FieldKey, (v: string) => string> = {
+  firstName: required('Enter your first name'),
+  lastName: required('Enter your last name'),
+  email: (v) => {
+    if (!v.trim()) return 'Enter your email address';
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) ? '' : 'Enter a valid email address';
+  },
+  phone: (v) => {
+    if (!v.trim()) return 'Enter your phone number';
+    return normalizePhone(v) ? '' : 'Enter a valid phone number';
+  },
+  password: (v) => {
+    if (!v) return 'Create a password';
+    if (v.length < 8) return 'Use at least 8 characters';
+    if (!/[A-Za-z]/.test(v) || !/\d/.test(v)) return 'Include at least one letter and one number';
+    return '';
+  },
+  driverLicense: required("Enter your driver's license number"),
+  vehicleType: required('Enter your vehicle type'),
+  vehicleModel: required('Enter the vehicle model'),
+  vehicleColor: required('Enter the vehicle color'),
+  vehicleRegistration: required('Enter the registration number'),
+  restaurantName: required('Enter the restaurant name'),
+  restaurantAddress: required('Enter the restaurant address'),
+};
+
+function passwordStrength(pw: string): { score: number; label: string } {
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (/[A-Za-z]/.test(pw) && /\d/.test(pw)) score++;
+  if (pw.length >= 12 || (/[a-z]/.test(pw) && /[A-Z]/.test(pw) && /[^A-Za-z0-9]/.test(pw))) score++;
+  return { score, label: ['Too weak', 'Weak', 'Good', 'Strong'][score] };
+}
+
+// ─── Reusable text field ────────────────────────────────────────────────────
+
+type FieldProps = TextInputProps & {
+  label: string;
+  error?: string;
+  hint?: string;
+  isPassword?: boolean;
+  containerStyle?: ViewStyle;
+};
+
+const Field = forwardRef<TextInput, FieldProps>(function Field(
+  { label, error, hint, isPassword, containerStyle, onFocus, onBlur, style, ...rest },
+  ref,
+) {
+  const [focused, setFocused] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <View style={containerStyle}>
+      <Text style={styles.label}>{label}</Text>
+      <View
+        style={[
+          styles.inputWrap,
+          rest.multiline && styles.inputWrapMultiline,
+          focused && styles.inputFocused,
+          !!error && styles.inputError,
+        ]}
+      >
+        <TextInput
+          ref={ref}
+          style={[styles.input, rest.multiline && styles.inputMultiline, style]}
+          placeholderTextColor={PLACEHOLDER}
+          selectionColor={INK}
+          secureTextEntry={isPassword && !visible}
+          accessibilityLabel={label}
+          onFocus={(e) => {
+            setFocused(true);
+            onFocus?.(e);
+          }}
+          onBlur={(e) => {
+            setFocused(false);
+            onBlur?.(e);
+          }}
+          {...rest}
+        />
+        {isPassword ? (
+          <TouchableOpacity
+            onPress={() => setVisible((v) => !v)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={visible ? 'Hide password' : 'Show password'}
+          >
+            <Ionicons name={visible ? 'eye-off-outline' : 'eye-outline'} size={20} color={MUTED} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      {error ? (
+        <Text style={styles.fieldError}>{error}</Text>
+      ) : hint ? (
+        <Text style={styles.fieldHint}>{hint}</Text>
+      ) : null}
+    </View>
+  );
+});
+
+// ─── Screen ─────────────────────────────────────────────────────────────────
 
 export default function RegisterScreen() {
   const params = useLocalSearchParams();
   const { register } = useAuth();
-  
-  const [step, setStep] = useState(1);
-  const [role, setRole] = useState<UserRole>((params.role as UserRole) || 'customer');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  
-  // Common user data
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    confirmPassword: '',
-    firstName: '',
-    lastName: '',
-    phoneNumber: '',
-  });
-  
-  // Role-specific data
-  const [customerData, setCustomerData] = useState({
-    deliveryAddress: '',
-  });
-  
-  const [driverData, setDriverData] = useState({
-    driverLicense: '',
-    vehicleType: '',
-    vehicleModel: '',
-    vehicleColor: '',
-    vehicleRegistration: '',
-  });
-  
-  const [managerData, setManagerData] = useState({
-    restaurantName: '',
-    restaurantAddress: '',
-  });
 
-  // Update role from URL params
+  const [role, setRole] = useState<UserRole>((params.role as UserRole) || 'customer');
+  const [step, setStep] = useState(1);
+  const [values, setValues] = useState<Values>(INITIAL_VALUES);
+  const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [termsError, setTermsError] = useState(false);
+  const [emailTaken, setEmailTaken] = useState('');
+  const [formError, setFormError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const inputRefs = useRef<Partial<Record<FieldKey, TextInput | null>>>({});
+
   useEffect(() => {
-    if (params.role) {
-      setRole(params.role as UserRole);
-    }
+    if (params.role) setRole(params.role as UserRole);
   }, [params.role]);
 
-  const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    setError('');
+  // Customers sign up on one screen. Drivers and restaurants need a second step.
+  const roleFields = role === 'driver' ? DRIVER_FIELDS : role === 'restaurant_manager' ? MANAGER_FIELDS : [];
+  const totalSteps = roleFields.length ? 2 : 1;
+  const isFinalStep = step === totalSteps;
+  const visibleFields: FieldKey[] = step === 1 ? ACCOUNT_FIELDS : roleFields;
+
+  const setValue = (key: FieldKey, value: string) => {
+    setValues((prev) => ({ ...prev, [key]: value }));
+    setFormError('');
+    if (key === 'email') setEmailTaken('');
   };
 
-  const handleCustomerDataChange = (field: string, value: string) => {
-    setCustomerData(prev => ({ ...prev, [field]: value }));
+  const markTouched = (key: FieldKey) => setTouched((prev) => ({ ...prev, [key]: true }));
+
+  const errorFor = (key: FieldKey) => {
+    if (key === 'email' && emailTaken) return emailTaken;
+    return touched[key] ? VALIDATORS[key](values[key]) : '';
   };
 
-  const handleDriverDataChange = (field: string, value: string) => {
-    setDriverData(prev => ({ ...prev, [field]: value }));
+  const strength = useMemo(() => passwordStrength(values.password), [values.password]);
+
+  // Focus the next field, or submit from the last one
+  const focusNext = (key: FieldKey) => {
+    const i = visibleFields.indexOf(key);
+    const next = visibleFields[i + 1];
+    if (next) inputRefs.current[next]?.focus();
+    else handleContinue();
   };
 
-  const handleManagerDataChange = (field: string, value: string) => {
-    setManagerData(prev => ({ ...prev, [field]: value }));
+  const handleContinue = async () => {
+    if (loading) return;
+
+    const firstInvalid = visibleFields.find((k) => VALIDATORS[k](values[k]));
+    setTouched((prev) => ({
+      ...prev,
+      ...Object.fromEntries(visibleFields.map((k) => [k, true])),
+    }));
+    if (firstInvalid) {
+      inputRefs.current[firstInvalid]?.focus();
+      return;
+    }
+
+    if (!isFinalStep) {
+      setStep(2);
+      return;
+    }
+
+    if (!acceptedTerms) {
+      setTermsError(true);
+      return;
+    }
+
+    await submit();
   };
 
-  const validateStep1 = () => {
-    const { email, password, confirmPassword, firstName, lastName, phoneNumber } = formData;
-    
-    if (!email || !password || !confirmPassword || !firstName || !lastName || !phoneNumber) {
-      setError('All fields are required');
-      return false;
-    }
-    
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError('Please enter a valid email address');
-      return false;
-    }
-    
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long');
-      return false;
-    }
-    
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return false;
-    }
-    
-    if (!/^[\+]?[1-9][\d]{0,15}$/.test(phoneNumber.replace(/\D/g, ''))) {
-      setError('Please enter a valid phone number');
-      return false;
-    }
-    
-    return true;
-  };
-
-  const validateStep2 = () => {
-    switch (role) {
-      case 'customer':
-        if (!customerData.deliveryAddress) {
-          setError('Delivery address is required');
-          return false;
-        }
-        break;
-      case 'driver':
-        if (!driverData.driverLicense || !driverData.vehicleType || !driverData.vehicleModel || 
-            !driverData.vehicleColor || !driverData.vehicleRegistration) {
-          setError('All driver information is required');
-          return false;
-        }
-        break;
-      case 'restaurant_manager':
-        if (!managerData.restaurantName || !managerData.restaurantAddress) {
-          setError('Restaurant name and address are required');
-          return false;
-        }
-        break;
-    }
-    return true;
-  };
-
-  const handleNext = () => {
-    if (step === 1) {
-      if (validateStep1()) {
-        setStep(2);
-        setError('');
-      }
-    } else {
-      handleRegister();
-    }
-  };
-
-  const handleBack = () => {
-    if (step === 1) {
-      router.back();
-    } else {
-      setStep(1);
-      setError('');
-    }
-  };
-
-  const handleRegister = async () => {
-    if (!validateStep2()) return;
-
+  const submit = async () => {
     setLoading(true);
-    setError('');
+    setFormError('');
 
     try {
-      // Prepare registration data
       const registrationData = {
-        email: formData.email,
-        password: formData.password,
+        email: values.email.trim().toLowerCase(),
+        password: values.password,
         role,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        phone_number: formData.phoneNumber,
-        ...(role === 'customer' && {
-          delivery_addresses: [{
-            label: 'Home',
-            address: customerData.deliveryAddress,
-            is_default: true,
-          }],
+        first_name: values.firstName.trim(),
+        last_name: values.lastName.trim(),
+        phone_number: normalizePhone(values.phone) as string,
+        ...(role === 'driver' && {
+          driverLicense: values.driverLicense.trim(),
+          vehicleType: values.vehicleType.trim(),
+          vehicleModel: values.vehicleModel.trim(),
+          vehicleColor: values.vehicleColor.trim(),
+          vehicleRegistration: values.vehicleRegistration.trim().toUpperCase(),
         }),
-        ...(role === 'driver' && driverData),
-        ...(role === 'restaurant_manager' && managerData),
+        ...(role === 'restaurant_manager' && {
+          restaurantName: values.restaurantName.trim(),
+          restaurantAddress: values.restaurantAddress.trim(),
+        }),
       };
 
       await register(registrationData);
-      // Registration successful - navigation is handled in useAuth hook
+      // Navigation after success is handled in the useAuth hook
     } catch (err: any) {
       console.error('Registration error:', err);
-      setError(err.message || 'Registration failed. Please try again.');
+      const message: string = err?.message || 'Something went wrong. Please try again.';
+
+      // Surface "email already registered" next to the email field
+      if (/email/i.test(message) && /(exist|taken|already|registered|in use)/i.test(message)) {
+        setEmailTaken('An account with this email already exists');
+        setStep(1);
+        setTimeout(() => inputRefs.current.email?.focus(), 50);
+      } else {
+        setFormError(message);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const getRoleTitle = () => {
-    switch (role) {
-      case 'customer': return 'Customer';
-      case 'driver': return 'Driver';
-      case 'restaurant_manager': return 'Restaurant Manager';
-      default: return '';
+  const handleBack = () => {
+    if (step > 1) {
+      setStep(step - 1);
+      setFormError('');
+    } else {
+      router.back();
     }
   };
 
-  const getRoleDescription = () => {
-    switch (role) {
-      case 'customer': return 'Order food from your favorite restaurants';
-      case 'driver': return 'Deliver orders and earn money';
-      case 'restaurant_manager': return 'Manage your restaurant and menus';
-      default: return '';
-    }
+  const bindField = (key: FieldKey, extra: Partial<FieldProps> = {}): FieldProps => {
+    const isLast = visibleFields[visibleFields.length - 1] === key;
+    return {
+      label: '',
+      ref: (el: TextInput | null) => {
+        inputRefs.current[key] = el;
+      },
+      value: values[key],
+      onChangeText: (v: string) => setValue(key, v),
+      onBlur: () => markTouched(key),
+      onSubmitEditing: () => focusNext(key),
+      returnKeyType: isLast ? 'done' : 'next',
+      blurOnSubmit: false,
+      error: errorFor(key),
+      ...extra,
+    } as FieldProps;
   };
 
-  const getRoleIcon = () => {
-    switch (role) {
-      case 'customer': return 'person';
-      case 'driver': return 'car';
-      case 'restaurant_manager': return 'restaurant';
-      default: return 'person';
-    }
-  };
+  const roleBadge =
+    role === 'driver' ? 'Driver account' : role === 'restaurant_manager' ? 'Restaurant account' : '';
 
-  const renderStep1 = () => (
+  const header =
+    step === 1
+      ? { title: 'Create your account', subtitle: 'Order from local restaurants in minutes.' }
+      : role === 'driver'
+        ? { title: 'Your vehicle', subtitle: 'We use this to verify you before your first delivery.' }
+        : { title: 'Your restaurant', subtitle: 'Tell us where customers can find you.' };
+
+  const renderAccountFields = () => (
     <>
-      <View style={styles.header}>
-        <Text style={styles.title}>Create Account</Text>
-        <Text style={styles.subtitle}>Join as {getRoleTitle().toLowerCase()}</Text>
+      <View style={styles.row}>
+        <Field
+          {...bindField('firstName', {
+            label: 'First name',
+            placeholder: 'John',
+            autoCapitalize: 'words',
+            autoComplete: 'name-given',
+            textContentType: 'givenName',
+            containerStyle: styles.half,
+          })}
+        />
+        <Field
+          {...bindField('lastName', {
+            label: 'Last name',
+            placeholder: 'Doe',
+            autoCapitalize: 'words',
+            autoComplete: 'name-family',
+            textContentType: 'familyName',
+            containerStyle: styles.half,
+          })}
+        />
       </View>
 
-      <View style={styles.roleDisplay}>
-        <View style={styles.roleIconContainer}>
-          <Ionicons name={getRoleIcon()} size={24} color={colors.primary} />
-        </View>
-        <View style={styles.roleInfo}>
-          <Text style={styles.roleTitle}>{getRoleTitle()}</Text>
-          <Text style={styles.roleDescription}>{getRoleDescription()}</Text>
-        </View>
-        <TouchableOpacity 
-          style={styles.changeRoleButton}
-          onPress={() => router.push('/(auth)/welcome')}
-        >
-          <Text style={styles.changeRoleText}>Change</Text>
-        </TouchableOpacity>
-      </View>
+      <Field
+        {...bindField('email', {
+          label: 'Email',
+          placeholder: 'you@example.com',
+          keyboardType: 'email-address',
+          autoCapitalize: 'none',
+          autoCorrect: false,
+          autoComplete: 'email',
+          textContentType: 'emailAddress',
+        })}
+      />
 
-      <View style={styles.form}>
-        {error ? (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
+      <Field
+        {...bindField('phone', {
+          label: 'Phone number',
+          placeholder: '082 123 4567',
+          keyboardType: 'phone-pad',
+          autoComplete: 'tel',
+          textContentType: 'telephoneNumber',
+          hint: 'We send order updates to this number.',
+        })}
+      />
+
+      <View>
+        <Field
+          {...bindField('password', {
+            label: 'Password',
+            placeholder: 'At least 8 characters',
+            isPassword: true,
+            autoCapitalize: 'none',
+            autoCorrect: false,
+            autoComplete: 'password-new',
+            textContentType: 'newPassword',
+          })}
+        />
+        {values.password.length > 0 && !errorFor('password') ? (
+          <View style={styles.strengthRow}>
+            <View style={styles.strengthBars}>
+              {[1, 2, 3].map((n) => (
+                <View
+                  key={n}
+                  style={[
+                    styles.strengthBar,
+                    strength.score >= n && {
+                      backgroundColor: strength.score === 3 ? GOOD : ACCENT,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+            <Text style={styles.strengthLabel}>{strength.label}</Text>
           </View>
         ) : null}
-
-        <View style={styles.nameRow}>
-          <Input
-            label="First Name"
-            placeholder="John"
-            value={formData.firstName}
-            onChangeText={(value) => handleInputChange('firstName', value)}
-            containerStyle={styles.halfInput}
-          />
-          <Input
-            label="Last Name"
-            placeholder="Doe"
-            value={formData.lastName}
-            onChangeText={(value) => handleInputChange('lastName', value)}
-            containerStyle={styles.halfInput}
-          />
-        </View>
-
-        <Input
-          label="Email Address"
-          placeholder="you@example.com"
-          value={formData.email}
-          onChangeText={(value) => handleInputChange('email', value)}
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-
-        <Input
-          label="Phone Number"
-          placeholder="+1 234 567 8900"
-          value={formData.phoneNumber}
-          onChangeText={(value) => handleInputChange('phoneNumber', value)}
-          keyboardType="phone-pad"
-        />
-
-        <Input
-          label="Password"
-          placeholder="••••••••"
-          value={formData.password}
-          onChangeText={(value) => handleInputChange('password', value)}
-          secureTextEntry
-        />
-
-        <Input
-          label="Confirm Password"
-          placeholder="••••••••"
-          value={formData.confirmPassword}
-          onChangeText={(value) => handleInputChange('confirmPassword', value)}
-          secureTextEntry
-        />
       </View>
     </>
   );
 
-  const renderStep2 = () => {
-    switch (role) {
-      case 'customer':
-        return (
-          <>
-            <View style={styles.header}>
-              <Text style={styles.title}>Delivery Address</Text>
-              <Text style={styles.subtitle}>Where should we deliver your orders?</Text>
-            </View>
-
-            <View style={styles.form}>
-              {error ? (
-                <View style={styles.errorContainer}>
-                  <Text style={styles.errorText}>{error}</Text>
-                </View>
-              ) : null}
-
-              <Input
-                label="Delivery Address"
-                placeholder="123 Main Street, Apt 4B, City, State 12345"
-                value={customerData.deliveryAddress}
-                onChangeText={(value) => handleCustomerDataChange('deliveryAddress', value)}
-                multiline
-                numberOfLines={3}
-                style={styles.textArea}
-              />
-
-              <View style={styles.noteContainer}>
-                <Ionicons name="information-circle" size={20} color={colors.info} />
-                <Text style={styles.noteText}>
-                  You can add more addresses later in your profile settings
-                </Text>
-              </View>
-            </View>
-          </>
-        );
-
-      case 'driver':
-        return (
-          <>
-            <View style={styles.header}>
-              <Text style={styles.title}>Driver Information</Text>
-              <Text style={styles.subtitle}>Tell us about your vehicle</Text>
-            </View>
-
-            <View style={styles.form}>
-              {error ? (
-                <View style={styles.errorContainer}>
-                  <Text style={styles.errorText}>{error}</Text>
-                </View>
-              ) : null}
-
-              <Input
-                label="Driver's License Number"
-                placeholder="DL12345678"
-                value={driverData.driverLicense}
-                onChangeText={(value) => handleDriverDataChange('driverLicense', value)}
-              />
-
-              <Input
-                label="Vehicle Type"
-                placeholder="Motorcycle, Car, Bicycle, etc."
-                value={driverData.vehicleType}
-                onChangeText={(value) => handleDriverDataChange('vehicleType', value)}
-              />
-
-              <View style={styles.nameRow}>
-                <Input
-                  label="Vehicle Model"
-                  placeholder="Honda Civic"
-                  value={driverData.vehicleModel}
-                  onChangeText={(value) => handleDriverDataChange('vehicleModel', value)}
-                  containerStyle={styles.halfInput}
-                />
-                <Input
-                  label="Vehicle Color"
-                  placeholder="Red"
-                  value={driverData.vehicleColor}
-                  onChangeText={(value) => handleDriverDataChange('vehicleColor', value)}
-                  containerStyle={styles.halfInput}
-                />
-              </View>
-
-              <Input
-                label="Vehicle Registration"
-                placeholder="ABC-123"
-                value={driverData.vehicleRegistration}
-                onChangeText={(value) => handleDriverDataChange('vehicleRegistration', value)}
-              />
-
-              <View style={styles.noteContainer}>
-                <Ionicons name="information-circle" size={20} color={colors.info} />
-                <Text style={styles.noteText}>
-                  This information is required for verification and safety purposes
-                </Text>
-              </View>
-            </View>
-          </>
-        );
-
-      case 'restaurant_manager':
-        return (
-          <>
-            <View style={styles.header}>
-              <Text style={styles.title}>Restaurant Information</Text>
-              <Text style={styles.subtitle}>Tell us about your restaurant</Text>
-            </View>
-
-            <View style={styles.form}>
-              {error ? (
-                <View style={styles.errorContainer}>
-                  <Text style={styles.errorText}>{error}</Text>
-                </View>
-              ) : null}
-
-              <Input
-                label="Restaurant Name"
-                placeholder="Pizza Palace"
-                value={managerData.restaurantName}
-                onChangeText={(value) => handleManagerDataChange('restaurantName', value)}
-              />
-
-              <Input
-                label="Restaurant Address"
-                placeholder="123 Main Street, City, State 12345"
-                value={managerData.restaurantAddress}
-                onChangeText={(value) => handleManagerDataChange('restaurantAddress', value)}
-                multiline
-                numberOfLines={3}
-                style={styles.textArea}
-              />
-
-              <View style={styles.noteContainer}>
-                <Ionicons name="information-circle" size={20} color={colors.info} />
-                <Text style={styles.noteText}>
-                  You can add more restaurants and menu items after registration
-                </Text>
-              </View>
-            </View>
-          </>
-        );
+  const renderRoleFields = () => {
+    if (role === 'driver') {
+      return (
+        <>
+          <Field
+            {...bindField('driverLicense', {
+              label: "Driver's license number",
+              placeholder: 'License number',
+              autoCapitalize: 'characters',
+              autoCorrect: false,
+            })}
+          />
+          <Field
+            {...bindField('vehicleType', {
+              label: 'Vehicle type',
+              placeholder: 'Motorcycle, car, bicycle…',
+              autoCapitalize: 'sentences',
+            })}
+          />
+          <View style={styles.row}>
+            <Field
+              {...bindField('vehicleModel', {
+                label: 'Model',
+                placeholder: 'Honda Civic',
+                autoCapitalize: 'words',
+                containerStyle: styles.half,
+              })}
+            />
+            <Field
+              {...bindField('vehicleColor', {
+                label: 'Color',
+                placeholder: 'Red',
+                autoCapitalize: 'words',
+                containerStyle: styles.half,
+              })}
+            />
+          </View>
+          <Field
+            {...bindField('vehicleRegistration', {
+              label: 'Registration number',
+              placeholder: 'AB 12 CD GP',
+              autoCapitalize: 'characters',
+              autoCorrect: false,
+            })}
+          />
+        </>
+      );
     }
+
+    return (
+      <>
+        <Field
+          {...bindField('restaurantName', {
+            label: 'Restaurant name',
+            placeholder: 'Pizza Palace',
+            autoCapitalize: 'words',
+          })}
+        />
+        <Field
+          {...bindField('restaurantAddress', {
+            label: 'Restaurant address',
+            placeholder: 'Street, suburb, city',
+            autoComplete: 'street-address',
+            textContentType: 'fullStreetAddress',
+            multiline: true,
+            blurOnSubmit: true,
+            returnKeyType: 'done',
+          })}
+        />
+      </>
+    );
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.flex}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Progress Steps */}
-          <View style={styles.stepsContainer}>
-            <View style={styles.step}>
-              <View style={[styles.stepCircle, step >= 1 ? styles.stepCircleActive : styles.stepCircleInactive]}>
-                <Text style={[styles.stepNumber, step >= 1 ? styles.stepNumberActive : styles.stepNumberInactive]}>
-                  1
-                </Text>
+        {/* Top bar */}
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            onPress={handleBack}
+            hitSlop={12}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="arrow-back" size={22} color={INK} />
+          </TouchableOpacity>
+
+          {totalSteps > 1 ? (
+            <>
+              <View style={styles.progress}>
+                {Array.from({ length: totalSteps }).map((_, i) => (
+                  <View
+                    key={i}
+                    style={[styles.progressSegment, i < step && styles.progressSegmentActive]}
+                  />
+                ))}
               </View>
-              <Text style={[styles.stepLabel, step >= 1 ? styles.stepLabelActive : styles.stepLabelInactive]}>
-                Account
+              <Text style={styles.stepText}>
+                {step}/{totalSteps}
               </Text>
-            </View>
-            
-            <View style={[styles.stepLine, step >= 2 ? styles.stepLineActive : styles.stepLineInactive]} />
-            
-            <View style={styles.step}>
-              <View style={[styles.stepCircle, step >= 2 ? styles.stepCircleActive : styles.stepCircleInactive]}>
-                <Text style={[styles.stepNumber, step >= 2 ? styles.stepNumberActive : styles.stepNumberInactive]}>
-                  2
-                </Text>
+            </>
+          ) : null}
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <Text style={styles.title}>{header.title}</Text>
+            <Text style={styles.subtitle}>{header.subtitle}</Text>
+            {step === 1 && roleBadge ? (
+              <View style={styles.rolePill}>
+                <Text style={styles.rolePillText}>{roleBadge}</Text>
               </View>
-              <Text style={[styles.stepLabel, step >= 2 ? styles.stepLabelActive : styles.stepLabelInactive]}>
-                {role === 'customer' ? 'Address' : role === 'driver' ? 'Vehicle' : 'Restaurant'}
-              </Text>
-            </View>
+            ) : null}
           </View>
 
-          {step === 1 ? renderStep1() : renderStep2()}
+          <View style={styles.form}>
+            {formError ? (
+              <View style={styles.errorBox} accessibilityLiveRegion="polite">
+                <Ionicons name="alert-circle" size={18} color={ERROR} />
+                <Text style={styles.errorBoxText}>{formError}</Text>
+              </View>
+            ) : null}
 
-          <View style={styles.buttonContainer}>
-            <Button
-              title={step === 1 ? "Next" : "Create Account"}
-              onPress={handleNext}
-              loading={loading}
-              disabled={loading}
-              style={styles.primaryButton}
-            />
-            
-            <Button
-              title="Back"
-              onPress={handleBack}
-              variant="outline"
-              style={styles.secondaryButton}
-            />
-          </View>
+            {step === 1 ? renderAccountFields() : renderRoleFields()}
 
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Already have an account? </Text>
-            <Link href="/(auth)/login" asChild>
-              <TouchableOpacity>
-                <Text style={styles.footerLink}>Sign In</Text>
-              </TouchableOpacity>
-            </Link>
+            {isFinalStep ? (
+              <View>
+                <TouchableOpacity
+                  style={styles.termsRow}
+                  onPress={() => {
+                    setAcceptedTerms((v) => !v);
+                    setTermsError(false);
+                  }}
+                  activeOpacity={0.7}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: acceptedTerms }}
+                >
+                  <Ionicons
+                    name={acceptedTerms ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={termsError ? ERROR : acceptedTerms ? INK : MUTED}
+                  />
+                  <Text style={styles.termsText}>
+                    I agree to the <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
+                    <Text style={styles.termsLink}>Privacy Policy</Text>
+                  </Text>
+                </TouchableOpacity>
+                {termsError ? (
+                  <Text style={[styles.fieldError, styles.termsError]}>
+                    Please accept to create your account
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         </ScrollView>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+            onPress={handleContinue}
+            disabled={loading}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: loading, busy: loading }}
+          >
+            {loading ? (
+              <ActivityIndicator color={INK} />
+            ) : (
+              <Text style={styles.primaryText}>{isFinalStep ? 'Create account' : 'Continue'}</Text>
+            )}
+          </TouchableOpacity>
+
+          <Link href="/(auth)/login" asChild>
+            <TouchableOpacity style={styles.signIn} activeOpacity={0.7}>
+              <Text style={styles.signInText}>
+                Already have an account? <Text style={styles.signInLink}>Sign in</Text>
+              </Text>
+            </TouchableOpacity>
+          </Link>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
+// ─── Styles ─────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 20,
-  },
-  stepsContainer: {
+  container: { flex: 1, backgroundColor: BG },
+  flex: { flex: 1 },
+
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 40,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 4,
+    gap: 16,
+    minHeight: 52,
   },
-  step: {
-    alignItems: 'center',
-  },
-  stepCircle: {
+  backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  stepCircleActive: {
-    backgroundColor: colors.primary,
-  },
-  stepCircleInactive: {
-    backgroundColor: colors.gray200,
-  },
-  stepNumber: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  stepNumberActive: {
-    color: '#fff',
-  },
-  stepNumberInactive: {
-    color: colors.gray600,
-  },
-  stepLabel: {
-    fontSize: 12,
-    marginTop: 8,
-  },
-  stepLabelActive: {
-    color: colors.primary,
-    fontWeight: '500',
-  },
-  stepLabelInactive: {
-    color: colors.gray500,
-  },
-  stepLine: {
-    width: 40,
-    height: 2,
-    marginHorizontal: 10,
-  },
-  stepLineActive: {
-    backgroundColor: colors.primary,
-  },
-  stepLineInactive: {
-    backgroundColor: colors.gray200,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.primary,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: colors.gray600,
-    textAlign: 'center',
-  },
-  roleDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.gray50,
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 30,
-  },
-  roleIconContainer: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: colors.primary + '20',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  roleInfo: {
-    flex: 1,
-  },
-  roleTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginBottom: 2,
-  },
-  roleDescription: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  changeRoleButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
     backgroundColor: '#fff',
-    borderRadius: 6,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: LINE,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  changeRoleText: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '500',
+  progress: { flex: 1, flexDirection: 'row', gap: 6 },
+  progressSegment: { flex: 1, height: 4, borderRadius: 2, backgroundColor: LINE },
+  progressSegmentActive: { backgroundColor: ACCENT },
+  stepText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: MUTED,
+    minWidth: 28,
+    textAlign: 'right',
   },
-  form: {
-    gap: 20,
-    marginBottom: 40,
+
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 28,
+    paddingTop: 20,
+    paddingBottom: 24,
   },
-  nameRow: {
+  header: { marginBottom: 24 },
+  title: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: INK,
+    letterSpacing: -0.5,
+    marginBottom: 6,
+  },
+  subtitle: { fontSize: 16, color: MUTED, lineHeight: 24 },
+  rolePill: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: ACCENT + '40',
+  },
+  rolePillText: { fontSize: 13, fontWeight: '700', color: INK },
+
+  form: { gap: 16 },
+  row: { flexDirection: 'row', gap: 12 },
+  half: { flex: 1 },
+
+  label: { fontSize: 14, fontWeight: '600', color: INK, marginBottom: 6 },
+  inputWrap: {
     flexDirection: 'row',
-    gap: 16,
+    alignItems: 'center',
+    minHeight: 52,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: LINE,
   },
-  halfInput: {
-    flex: 1,
-  },
-  errorContainer: {
-    backgroundColor: colors.errorLight,
-    padding: 15,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.error,
-  },
-  errorText: {
-    color: colors.error,
-    textAlign: 'center',
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  noteContainer: {
+  inputWrapMultiline: { alignItems: 'flex-start', paddingVertical: 12 },
+  inputFocused: { borderColor: INK },
+  inputError: { borderColor: ERROR },
+  input: { flex: 1, fontSize: 16, color: INK, paddingVertical: 12 },
+  inputMultiline: { minHeight: 72, textAlignVertical: 'top', paddingVertical: 0 },
+  fieldError: { fontSize: 13, color: ERROR, marginTop: 6 },
+  fieldHint: { fontSize: 13, color: MUTED, marginTop: 6 },
+
+  strengthRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
+  strengthBars: { flexDirection: 'row', gap: 4, flex: 1 },
+  strengthBar: { flex: 1, height: 4, borderRadius: 2, backgroundColor: LINE },
+  strengthLabel: { fontSize: 12, fontWeight: '600', color: MUTED },
+
+  termsRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingTop: 4 },
+  termsText: { flex: 1, fontSize: 14, color: MUTED, lineHeight: 21, paddingTop: 2 },
+  termsLink: { color: INK, fontWeight: '700' },
+  termsError: { marginLeft: 34 },
+
+  errorBox: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.infoLight,
-    padding: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.info,
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: ERROR_BG,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
   },
-  noteText: {
-    fontSize: 14,
-    color: colors.infoDark,
-    marginLeft: 12,
-    flex: 1,
-  },
-  buttonContainer: {
-    gap: 15,
-    marginBottom: 40,
+  errorBoxText: { flex: 1, fontSize: 14, color: ERROR },
+
+  footer: {
+    paddingHorizontal: 28,
+    paddingTop: 10,
+    paddingBottom: 8,
+    alignItems: 'center',
+    backgroundColor: BG,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: LINE,
   },
   primaryButton: {
     width: '100%',
-  },
-  secondaryButton: {
-    width: '100%',
-  },
-  footer: {
-    flexDirection: 'row',
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 20,
-    paddingBottom: 40,
   },
-  footerText: {
-    color: colors.gray600,
-  },
-  footerLink: {
-    color: colors.primary,
-    fontWeight: '600',
-  },
+  primaryButtonDisabled: { opacity: 0.7 },
+  primaryText: { fontSize: 17, fontWeight: '700', color: INK },
+  signIn: { paddingVertical: 12 },
+  signInText: { fontSize: 15, color: MUTED },
+  signInLink: { color: INK, fontWeight: '700' },
 });
