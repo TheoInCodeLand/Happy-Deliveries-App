@@ -25,8 +25,11 @@ export const driverService = {
     return api.post(`/orders/${orderId}/decline`);
   },
 
-  async updateOrderStatus(orderId: string, status: string) {
-    return api.patch(`/orders/${orderId}/status`, { status });
+  async updateOrderStatus(orderId: string, status: string, coords?: { lat: number; lng: number }) {
+    return api.patch(`/orders/${orderId}/status`, {
+      status,
+      ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+    });
   },
 
   async verifyDeliveryCode(orderId: string, code: string) {
@@ -53,8 +56,13 @@ export const driverService = {
     return api.put('/drivers/status', { status });
   },
 
-  async updateLocation(lat: number, lng: number) {
-    return api.put('/drivers/location', { lat, lng });
+  async updateLocation(lat: number, lng: number, orderId?: string, extra?: { accuracy?: number | null; speed?: number | null }) {
+    return api.put('/drivers/location', {
+      lat,
+      lng,
+      ...(orderId ? { orderId } : {}),
+      ...(extra || {}),
+    });
   },
 
   async getVehicleInfo() {

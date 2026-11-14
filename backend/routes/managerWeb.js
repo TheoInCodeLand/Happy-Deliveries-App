@@ -77,6 +77,8 @@ const getModel = {
     Restaurant: () => require('../src/models/Restaurant'),
     Menu: () => require('../src/models/Menu'),
     Order: () => require('../src/models/Order'),
+    Driver: () => require('../src/models/Driver'),
+    EmailService: () => require('../src/utils/emailService'),
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -669,6 +671,32 @@ router.get('/settings', isLoggedIn, async (req, res) => {
         });
     } catch (err) {
         console.error('[GET /manager/settings]', err);
+        res.redirect('/manager/login');
+    }
+});
+
+// ── Public Driver Registration Web Portal ─────────────────────────────────────
+
+router.get('/driver-register', (req, res) => {
+    res.render('driver/register', {
+        title: 'Driver Registration Portal · Happy Delivery',
+    });
+});
+
+// ── Manage Drivers (Manager Portal) ───────────────────────────────────────────
+
+router.get('/drivers', isLoggedIn, async (req, res) => {
+    try {
+        const manager = await resolveManager(req);
+        if (!manager) { req.session.destroy(); return res.redirect('/manager/login'); }
+
+        res.render('manager/drivers', {
+            title: 'Manage Drivers',
+            currentPage: 'drivers',
+            manager: req.session.user,
+        });
+    } catch (err) {
+        console.error('[GET /manager/drivers]', err);
         res.redirect('/manager/login');
     }
 });
@@ -1592,28 +1620,56 @@ router.get('/api/orders/pending', isLoggedInApi, async (req, res) => {
     }
 });
 
-/** POST /api/orders/:id/publish — publish a pending order to available drivers */
-router.post('/api/orders/:id/publish', isLoggedInApi, async (req, res) => {
+/** POST /api/orders/:id/publish (and /accept) — manager accepts a pending order so the customer can pay */
+router.post(['/api/orders/:id/publish', '/api/orders/:id/accept'], isLoggedInApi, async (req, res) => {
     try {
         const manager = await resolveManager(req);
         if (!manager) return res.status(403).json({ success: false, error: 'Manager not found' });
 
         const Order = getModel.Order();
-        const order = await Order.publishOrder(req.params.id, req.session.user.id);
+        const order = await Order.acceptByManager(req.params.id, req.session.user.id);
         const io = req.app.get('io');
         if (io) {
-            const restaurantResult = await db.query('SELECT name FROM restaurants WHERE id = $1', [order.restaurant_id]);
-            const restaurantName = restaurantResult.rows[0]?.name || 'New order';
-            io.to('drivers').emit('new_order', {
+            io.to('restaurant_managers').emit('order_updated', {
                 orderId: order.id,
-                restaurantName,
-                total: order.total_amount,
-                order_number: order.order_number
+                status: order.status,
+                order
             });
         }
-        res.json({ success: true, order });
+        res.json({
+            success: true,
+            message: 'Order accepted! Waiting for customer payment before dispatching to drivers.',
+            order
+        });
     } catch (err) {
-        console.error('[API POST orders/:id/publish]', err);
+        console.error('[API POST orders/:id/accept]', err);
+        res.status(400).json({ success: false, error: err.message });
+    }
+});
+
+/** POST /api/orders/:id/reject — manager rejects and cancels a pending order */
+router.post('/api/orders/:id/reject', isLoggedInApi, async (req, res) => {
+    try {
+        const manager = await resolveManager(req);
+        if (!manager) return res.status(403).json({ success: false, error: 'Manager not found' });
+
+        const Order = getModel.Order();
+        const order = await Order.rejectByManager(req.params.id, req.session.user.id);
+        const io = req.app.get('io');
+        if (io) {
+            io.to('restaurant_managers').emit('order_updated', {
+                orderId: order.id,
+                status: 'cancelled',
+                order
+            });
+        }
+        res.json({
+            success: true,
+            message: 'Order rejected and cancelled.',
+            order
+        });
+    } catch (err) {
+        console.error('[API POST orders/:id/reject]', err);
         res.status(400).json({ success: false, error: err.message });
     }
 });
@@ -1630,6 +1686,15 @@ router.patch('/api/orders/:id/status', isLoggedInApi, async (req, res) => {
         }
 
         const Order = getModel.Order();
+        if (status === 'cancelled') {
+            const cancelledOrder = await Order.rejectByManager(req.params.id, req.session.user.id);
+            return res.json({ success: true, order: cancelledOrder });
+        }
+        if (status === 'ordering_at_restaurant') {
+            const acceptedOrder = await Order.acceptByManager(req.params.id, req.session.user.id);
+            return res.json({ success: true, order: acceptedOrder });
+        }
+
         const order = await Order.findById(req.params.id, req.session.user.id, 'restaurant_manager');
         if (!order) {
             return res.status(404).json({ success: false, error: 'Order not found or access denied' });
@@ -1651,16 +1716,21 @@ router.get('/api/orders/stats', isLoggedInApi, async (req, res) => {
 
         const restaurants = await fetchRestaurants(manager.id);
         if (!restaurants.length) {
-            return res.json({ success: true, stats: { active: 0, revenue: '0.00', total_today: 0 } });
+            return res.json({ success: true, stats: { active: 0, pending: 0, revenue: '0.00', total_today: 0 } });
         }
 
         const ids = restaurants.map(r => r.id);
 
-        const [active, revenue, total] = await Promise.all([
+        const [active, pending, revenue, total] = await Promise.all([
             db.query(`
                 SELECT COUNT(*) AS c FROM orders
                 WHERE restaurant_id = ANY($1::uuid[])
                   AND status IN ('pending','accepted_by_driver','ordering_at_restaurant','order_ready','picked_up','on_the_way')
+            `, [ids]),
+            db.query(`
+                SELECT COUNT(*) AS c FROM orders
+                WHERE restaurant_id = ANY($1::uuid[])
+                  AND status = 'pending'
             `, [ids]),
             db.query(`
                 SELECT COALESCE(SUM(total_amount), 0) AS s FROM orders
@@ -1679,6 +1749,7 @@ router.get('/api/orders/stats', isLoggedInApi, async (req, res) => {
             success: true,
             stats: {
                 active: parseInt(active.rows[0].c, 10),
+                pending: parseInt(pending.rows[0].c, 10),
                 revenue: parseFloat(revenue.rows[0].s).toFixed(2),
                 total_today: parseInt(total.rows[0].c, 10),
             },
@@ -1856,6 +1927,418 @@ router.put('/api/settings/password', isLoggedInApi, async (req, res) => {
     } catch (err) {
         console.error('[API settings/password]', err);
         res.status(500).json({ success: false, error: 'Failed to update password' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PUBLIC DRIVER REGISTRATION PORTAL API & MANAGER DRIVER OVERSIGHT API
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /manager/api/driver-applications
+ * Public endpoint for prospective drivers to submit (or resubmit) their application.
+ */
+router.post('/api/driver-applications', async (req, res) => {
+    try {
+        const b = req.body || {};
+        const email = (b.email || '').trim().toLowerCase();
+        const password = b.password || '';
+        const first_name = (b.first_name || '').trim();
+        const last_name = (b.last_name || '').trim();
+        const phone_number = (b.phone_number || '').trim();
+        const driver_license_number = (b.driver_license_number || '').trim();
+        const license_expiry_date = b.license_expiry_date || '';
+        const vehicle_type = (b.vehicle_type || '').trim();
+        const vehicle_model = (b.vehicle_model || '').trim();
+        const vehicle_Registration = (b.vehicle_Registration || b.vehicle_registration || '').trim();
+
+        if (!first_name || !last_name || !email || !phone_number || !password) {
+            return res.status(400).json({
+                success: false,
+                error: 'Please complete all personal account fields (First Name, Last Name, Email, Phone Number, and Password).',
+            });
+        }
+
+        if (password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                error: 'Password must be at least 6 characters long.',
+            });
+        }
+
+        if (!driver_license_number || !license_expiry_date || !vehicle_type || !vehicle_model || !vehicle_Registration) {
+            return res.status(400).json({
+                success: false,
+                error: 'Please complete all required Driver License and Vehicle fields.',
+            });
+        }
+
+        const User = getModel.User();
+        const Driver = getModel.Driver();
+        const EmailService = getModel.EmailService();
+
+        const existingUser = await User.findByEmail(email);
+
+        // If an account with this email already exists, allow a driver to update & resubmit their application if password matches
+        if (existingUser) {
+            if (existingUser.role !== 'driver') {
+                return res.status(409).json({
+                    success: false,
+                    error: 'This email address is already registered to a non-driver account.',
+                });
+            }
+
+            const validPass = await User.verifyPassword(password, existingUser.password_hash);
+            if (!validPass) {
+                return res.status(409).json({
+                    success: false,
+                    error: 'An application with this email already exists. Enter your existing account password to update and resubmit your application, or use the Check Application Status tab.',
+                });
+            }
+
+            const existingDriver = await Driver.findByUserId(existingUser.id);
+            if (!existingDriver) {
+                const createdProfile = await Driver.create(existingUser.id, {
+                    ...b,
+                    vehicle_Registration,
+                });
+                const fullDriver = await Driver.findByIdWithUser(createdProfile.id);
+                await EmailService.sendDriverApplicationReceivedEmail(existingUser, fullDriver);
+                return res.status(201).json({
+                    success: true,
+                    resubmitted: true,
+                    message: 'Your driver application has been submitted and is pending manager review.',
+                    driver: fullDriver,
+                });
+            }
+
+            if (existingDriver.approval_status === 'approved' && existingUser.is_active) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Your driver account is already approved! You can sign in directly on the Happy Delivery mobile app.',
+                });
+            }
+
+            const updatedDriver = await Driver.updateApplication(existingDriver.id, {
+                ...b,
+                first_name,
+                last_name,
+                phone_number,
+                vehicle_Registration,
+            });
+
+            try {
+                await EmailService.sendDriverApplicationReceivedEmail(
+                    { first_name, last_name, email },
+                    updatedDriver
+                );
+            } catch (emailErr) {
+                console.warn('[POST /api/driver-applications resubmit email]', emailErr.message);
+            }
+
+            const io = req.app?.get('io');
+            if (io) {
+                io.to('restaurant_managers').emit('new_driver_application', {
+                    driver: updatedDriver,
+                    resubmitted: true,
+                });
+            }
+
+            return res.json({
+                success: true,
+                resubmitted: true,
+                message: 'Your updated driver application has been resubmitted for review! You will receive an email once management reviews your updated details.',
+                driver: updatedDriver,
+            });
+        }
+
+        // Create new driver user (inactive until manager approves)
+        const newUser = await User.create({
+            email,
+            password,
+            role: 'driver',
+            first_name,
+            last_name,
+            phone_number,
+            is_active: false,
+        });
+
+        let createdDriver;
+        try {
+            createdDriver = await Driver.create(newUser.id, {
+                ...b,
+                vehicle_Registration,
+            });
+        } catch (driverErr) {
+            // Rollback user if driver creation failed (e.g. duplicate driver license number)
+            await db.query('DELETE FROM users WHERE id = $1', [newUser.id]).catch(() => {});
+            const msg = driverErr.message?.includes('driver_license_number')
+                ? 'A driver application with this Driver License Number already exists.'
+                : driverErr.message;
+            return res.status(400).json({
+                success: false,
+                error: msg || 'Failed to save driver application details.',
+            });
+        }
+
+        const fullDriver = await Driver.findByIdWithUser(createdDriver.id);
+
+        try {
+            await EmailService.sendDriverApplicationReceivedEmail(newUser, fullDriver);
+        } catch (emailErr) {
+            console.warn('[POST /api/driver-applications email]', emailErr.message);
+        }
+
+        const io = req.app?.get('io');
+        if (io) {
+            io.to('restaurant_managers').emit('new_driver_application', {
+                driver: fullDriver,
+                resubmitted: false,
+            });
+        }
+
+        return res.status(201).json({
+            success: true,
+            message: 'Your driver application has been submitted! Management will review your registration and email you once your account is approved.',
+            driver: fullDriver,
+        });
+    } catch (err) {
+        console.error('[POST /api/driver-applications]', err);
+        res.status(500).json({
+            success: false,
+            error: err.message || 'Failed to submit driver application',
+        });
+    }
+});
+
+/**
+ * POST /manager/api/driver-applications/status
+ * Public endpoint for a driver applicant to check their approval status & load details for resubmission.
+ */
+router.post('/api/driver-applications/status', async (req, res) => {
+    try {
+        const email = (req.body?.email || '').trim().toLowerCase();
+        const password = req.body?.password || '';
+
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                error: 'Please enter both your email address and password.',
+            });
+        }
+
+        const User = getModel.User();
+        const Driver = getModel.Driver();
+
+        const user = await User.findByEmail(email);
+        if (!user || user.role !== 'driver') {
+            return res.status(404).json({
+                success: false,
+                error: 'No driver application was found with that email address.',
+            });
+        }
+
+        const valid = await User.verifyPassword(password, user.password_hash);
+        if (!valid) {
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid password for this driver application.',
+            });
+        }
+
+        const driver = await Driver.findByEmailWithUser(email);
+        if (!driver) {
+            return res.status(404).json({
+                success: false,
+                error: 'Driver profile record not found.',
+            });
+        }
+
+        res.json({
+            success: true,
+            driver,
+        });
+    } catch (err) {
+        console.error('[POST /api/driver-applications/status]', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to check application status.',
+        });
+    }
+});
+
+/**
+ * GET /manager/api/drivers
+ * Manager endpoint to list all driver applications & active drivers with stats.
+ */
+router.get('/api/drivers', isLoggedInApi, async (req, res) => {
+    try {
+        const Driver = getModel.Driver();
+        const [drivers, stats] = await Promise.all([
+            Driver.getAllForManager({
+                status: req.query.status || 'all',
+                search: req.query.search || '',
+                vehicle_type: req.query.vehicle_type || 'all',
+            }),
+            Driver.getManagerStats(),
+        ]);
+
+        res.json({
+            success: true,
+            drivers,
+            stats,
+        });
+    } catch (err) {
+        console.error('[GET /manager/api/drivers]', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to load drivers list',
+        });
+    }
+});
+
+/**
+ * GET /manager/api/drivers/:id
+ * Manager endpoint to inspect a single driver's full registration & application details.
+ */
+router.get('/api/drivers/:id', isLoggedInApi, async (req, res) => {
+    try {
+        const Driver = getModel.Driver();
+        const driver = await Driver.findByIdWithUser(req.params.id);
+        if (!driver) {
+            return res.status(404).json({
+                success: false,
+                error: 'Driver application not found',
+            });
+        }
+
+        res.json({
+            success: true,
+            driver,
+        });
+    } catch (err) {
+        console.error('[GET /manager/api/drivers/:id]', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to load driver details',
+        });
+    }
+});
+
+/**
+ * POST /manager/api/drivers/:id/approve
+ * Manager approves a driver registration -> activates user account and sends approval email.
+ */
+router.post('/api/drivers/:id/approve', isLoggedInApi, async (req, res) => {
+    try {
+        const Driver = getModel.Driver();
+        const EmailService = getModel.EmailService();
+        const notes = (req.body?.notes || '').trim();
+
+        const existing = await Driver.findByIdWithUser(req.params.id);
+        if (!existing) {
+            return res.status(404).json({
+                success: false,
+                error: 'Driver application not found',
+            });
+        }
+
+        const approvedDriver = await Driver.approveApplication(
+            req.params.id,
+            req.session.user.id,
+            notes || null
+        );
+
+        let emailResult = null;
+        try {
+            emailResult = await EmailService.sendDriverApprovedEmail(approvedDriver, notes || null);
+        } catch (emailErr) {
+            console.warn('[POST /api/drivers/:id/approve email]', emailErr.message);
+        }
+
+        const io = req.app?.get('io');
+        if (io) {
+            io.to('restaurant_managers').emit('driver_application_updated', {
+                driver_id: approvedDriver.id,
+                approval_status: 'approved',
+                driver: approvedDriver,
+            });
+        }
+
+        res.json({
+            success: true,
+            message: `Driver account for ${approvedDriver.first_name} ${approvedDriver.last_name} has been approved and an email notification was sent to ${approvedDriver.email}.`,
+            driver: approvedDriver,
+            emailResult,
+        });
+    } catch (err) {
+        console.error('[POST /manager/api/drivers/:id/approve]', err);
+        res.status(500).json({
+            success: false,
+            error: err.message || 'Failed to approve driver application',
+        });
+    }
+});
+
+/**
+ * POST /manager/api/drivers/:id/reject
+ * Manager rejects a driver registration with a detailed reason -> deactivates login & emails reason to driver.
+ */
+router.post('/api/drivers/:id/reject', isLoggedInApi, async (req, res) => {
+    try {
+        const Driver = getModel.Driver();
+        const EmailService = getModel.EmailService();
+        const reason = (req.body?.reason || '').trim();
+
+        if (!reason) {
+            return res.status(400).json({
+                success: false,
+                error: 'Please provide a reason explaining what was wrong with the application so we can email it to the driver.',
+            });
+        }
+
+        const existing = await Driver.findByIdWithUser(req.params.id);
+        if (!existing) {
+            return res.status(404).json({
+                success: false,
+                error: 'Driver application not found',
+            });
+        }
+
+        const rejectedDriver = await Driver.rejectApplication(
+            req.params.id,
+            req.session.user.id,
+            reason
+        );
+
+        let emailResult = null;
+        try {
+            emailResult = await EmailService.sendDriverRejectedEmail(rejectedDriver, reason);
+        } catch (emailErr) {
+            console.warn('[POST /api/drivers/:id/reject email]', emailErr.message);
+        }
+
+        const io = req.app?.get('io');
+        if (io) {
+            io.to('restaurant_managers').emit('driver_application_updated', {
+                driver_id: rejectedDriver.id,
+                approval_status: 'rejected',
+                driver: rejectedDriver,
+            });
+        }
+
+        res.json({
+            success: true,
+            message: `Application for ${rejectedDriver.first_name} ${rejectedDriver.last_name} was marked as rejected and an email explaining what needs to be fixed was sent to ${rejectedDriver.email}.`,
+            driver: rejectedDriver,
+            emailResult,
+        });
+    } catch (err) {
+        console.error('[POST /manager/api/drivers/:id/reject]', err);
+        res.status(500).json({
+            success: false,
+            error: err.message || 'Failed to reject driver application',
+        });
     }
 });
 

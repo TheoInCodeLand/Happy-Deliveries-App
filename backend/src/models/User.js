@@ -5,19 +5,20 @@ const jwt = require('jsonwebtoken');
 class User {
   // Create new user
   static async create(userData) {
-    const { email, phone_number, password, role, first_name, last_name } = userData;
+    const { email, phone_number, password, role, first_name, last_name, is_active } = userData;
     
     // Hash password
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
+    const activeFlag = is_active !== undefined ? Boolean(is_active) : role !== 'driver';
     
     const query = `
-      INSERT INTO users (email, phone_number, password_hash, role, first_name, last_name)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, email, phone_number, role, first_name, last_name, created_at
+      INSERT INTO users (email, phone_number, password_hash, role, first_name, last_name, is_active)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, email, phone_number, role, first_name, last_name, is_active, created_at
     `;
     
-    const result = await db.query(query, [email, phone_number, password_hash, role, first_name, last_name]);
+    const result = await db.query(query, [email, phone_number, password_hash, role, first_name, last_name, activeFlag]);
     return result.rows[0];
   }
 

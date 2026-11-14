@@ -7,7 +7,8 @@ const {
   acceptOrder,
   declineOrder,
   updateOrderStatus,
-  verifyDeliveryCode
+  verifyDeliveryCode,
+  getOrderTracking
 } = require('../controllers/orderController');
 const { auth, authorize } = require('../middleware/auth');
 
@@ -26,6 +27,9 @@ router.patch('/:id/status', auth, authorize('driver', 'restaurant_manager'), upd
 
 // Delivery code verification - drivers only
 router.post('/:id/verify-code', auth, authorize('driver'), verifyDeliveryCode);
+
+// Live tracking route
+router.get('/:id/tracking', auth, getOrderTracking);
 
 // Parameterized routes last
 router.get('/:id', auth, getOrder);

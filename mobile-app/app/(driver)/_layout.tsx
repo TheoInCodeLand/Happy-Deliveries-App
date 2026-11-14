@@ -43,6 +43,7 @@ export default function DriverLayout() {
   return (
     // <Stack>
     <Tabs
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         tabBarStyle: styles.tabBar,
@@ -103,14 +104,16 @@ export default function DriverLayout() {
       <Tabs.Screen
         name="profile/vehicle"
         options={{ 
-          href: null 
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }}
       />
 
       <Tabs.Screen
         name="orders/[id]"
         options={{ 
-          href: null 
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }}
       />
 

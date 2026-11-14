@@ -6,10 +6,13 @@ const db = require('../config/database');
 // Create order
 exports.createOrder = async (req, res) => {
   try {
-    const customer = await Customer.findByUserId(req.user.id);
+    let customer = await Customer.findByUserId(req.user.id);
+    if (!customer) {
+      customer = await Customer.create(req.user.id);
+    }
     const newOrder = await Order.create(customer.id, req.body);
     const io = req.app.get('io');
-    // Notify only managers about the new order; drivers should see it only after publish.
+    // Notify only managers about the new order; drivers will see it only after manager accepts AND customer completes payment.
     if (io) {
       const restaurantResult = await db.query('SELECT name FROM restaurants WHERE id = $1', [req.body.restaurant_id]);
       const restaurantName = restaurantResult.rows[0]?.name || 'New order';
@@ -18,7 +21,11 @@ exports.createOrder = async (req, res) => {
         orderId: newOrder.id,
         restaurantName,
         total: newOrder.total_amount,
-        order_number: newOrder.order_number
+        order_number: newOrder.order_number,
+        order: {
+          ...newOrder,
+          restaurant_name: restaurantName
+        }
       });
     }
     res.status(201).json({ success: true, data: newOrder });
@@ -237,18 +244,20 @@ exports.updateOrderStatus = async (req, res) => {
     } else if (userRole === 'restaurant_manager') {
       // Verify manager owns the restaurant
       const managerRes = await db.query(
-        `SELECT id FROM restaurant_managers WHERE user_id = $1`,
-        [req.user.id]
+        `SELECT r.id FROM restaurants r
+         JOIN restaurant_managers rm ON r.manager_id = rm.id
+         WHERE r.id = $1 AND rm.user_id = $2`,
+        [order.restaurant_id, req.user.id]
       );
       
-      if (managerRes.rows.length === 0 || order.restaurant_id !== order.restaurant_id) {
+      if (managerRes.rows.length === 0) {
         return res.status(403).json({
           success: false,
           error: 'Not authorized to update this order'
         });
       }
       
-      // Valid manager transitions: pending → ordering_at_restaurant → order_ready or cancel
+      // Valid manager transitions: pending → ordering_at_restaurant (accept) or cancelled (reject)
       const validManagerTransitions = {
         'pending': ['ordering_at_restaurant', 'cancelled'],
         'ordering_at_restaurant': ['order_ready', 'cancelled'],
@@ -268,10 +277,15 @@ exports.updateOrderStatus = async (req, res) => {
       });
     }
     
+    const lat = req.body.lat ?? req.body.latitude;
+    const lng = req.body.lng ?? req.body.longitude;
+    const locationCoords = (lat !== undefined && lng !== undefined) ? { lat, lng } : null;
+
     const updatedOrder = await Order.updateStatus(
       orderId,
       status,
-      driver ? driver.id : null
+      driver ? driver.id : null,
+      locationCoords
     );
     
     res.json({
@@ -280,6 +294,73 @@ exports.updateOrderStatus = async (req, res) => {
     });
   } catch (error) {
     console.error('Update order status error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Get live tracking data for an order
+exports.getOrderTracking = async (req, res) => {
+  try {
+    const order = await Order.findById(
+      req.params.id,
+      req.user.id,
+      req.user.role
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Order not found'
+      });
+    }
+
+    let history = [];
+    try {
+      const trackRes = await db.query(
+        `SELECT location, accuracy, speed, created_at
+         FROM delivery_tracking
+         WHERE order_id = $1
+         ORDER BY created_at DESC
+         LIMIT 25`,
+        [order.id]
+      );
+      history = trackRes.rows;
+    } catch {
+      // ignore if table not present
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: order.id,
+        order_number: order.order_number,
+        status: order.status,
+        driver_id: order.driver_id,
+        driver_first_name: order.driver_first_name,
+        driver_last_name: order.driver_last_name,
+        driver_phone: order.driver_phone,
+        driver_image: order.driver_image,
+        driver_vehicle_type: order.driver_vehicle_type,
+        driver_vehicle_model: order.driver_vehicle_model,
+        driver_vehicle_color: order.driver_vehicle_color,
+        driver_vehicle_plate: order.driver_vehicle_plate,
+        driver_location: order.driver_location,
+        driver_last_location_update: order.driver_last_location_update,
+        restaurant_name: order.restaurant_name,
+        restaurant_address: order.restaurant_address,
+        restaurant_location: order.restaurant_location,
+        delivery_address: order.delivery_address,
+        verification_code: req.user.role === 'customer' ? order.verification_code : undefined,
+        code_expires_at: req.user.role === 'customer' ? order.code_expires_at : undefined,
+        code_used_at: req.user.role === 'customer' ? order.code_used_at : undefined,
+        history
+      }
+    });
+  } catch (error) {
+    console.error('Get order tracking error:', error);
     res.status(500).json({
       success: false,
       error: error.message

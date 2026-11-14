@@ -11,6 +11,7 @@ export default function CustomerLayout() {
 
   return (
     <Tabs
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         tabBarStyle: styles.tabBar,
@@ -20,8 +21,11 @@ export default function CustomerLayout() {
         tabBarLabelStyle: styles.tabBarLabel,
       }}
     >
+      {/* ── Visible Tab Screens ── */}
+      {/* Each name maps to a sub-folder that has its own _layout.tsx (Stack) */}
+
       <Tabs.Screen
-        name="home/index"
+        name="home"
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size, focused }) => (
@@ -31,29 +35,9 @@ export default function CustomerLayout() {
           ),
         }}
       />
-{/* 
-      <Tabs.Screen
-        name="home/restaurants"
-        options={{
-          title: 'Restaurants',
-          tabBarIcon: ({ color, size, focused }) => (
-            <View style={focused ? styles.activeIcon : null}>
-              <Ionicons name={focused ? 'restaurant' : 'restaurant-outline'} size={size} color={color} />
-            </View>
-          ),
-        }}
-      /> */}
 
       <Tabs.Screen
-        name="home/restaurants"
-        options={{ 
-          href: null, // This hides the button
-          tabBarStyle: { display: 'none' } // Optional: This hides the tab bar when on this screen
-        }} 
-      />
-      
-      <Tabs.Screen
-        name="search/index"
+        name="search"
         options={{
           title: 'Search',
           tabBarIcon: ({ color, size, focused }) => (
@@ -63,21 +47,21 @@ export default function CustomerLayout() {
           ),
         }}
       />
-      
+
       <Tabs.Screen
-        name="orders/index"
+        name="orders"
         options={{
           title: 'Orders',
           tabBarIcon: ({ color, size, focused }) => (
             <View style={focused ? styles.activeIcon : null}>
-              <MaterialIcons name={focused ? 'receipt-long' : 'receipt-long'} size={size} color={color} />
+              <MaterialIcons name="receipt-long" size={size} color={color} />
             </View>
           ),
         }}
       />
-      
+
       <Tabs.Screen
-        name="cart/index"
+        name="cart"
         options={{
           title: 'Cart',
           tabBarIcon: ({ color, size, focused }) => (
@@ -88,59 +72,37 @@ export default function CustomerLayout() {
           tabBarBadge: cartCount > 0 ? cartCount : undefined,
         }}
       />
-      
+
       <Tabs.Screen
-        name="profile/index"
+        name="profile"
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, size, focused }) => (
             <View style={focused ? styles.activeIcon : null}>
-              <Feather name={focused ? 'user' : 'user'} size={size} color={color} />
+              <Feather name="user" size={size} color={color} />
             </View>
           ),
         }}
       />
 
-      <Tabs.Screen 
-        name="orders/[id]" 
-        options={{ 
-          href: null, // This hides the button
-          tabBarStyle: { display: 'none' } // Optional: This hides the tab bar when on this screen
-        }} 
-      />
-      
-      <Tabs.Screen 
-        name="orders/tracking" 
-        options={{ 
-          href: null,
-          tabBarStyle: { display: 'none' }
-        }} 
-      />
-      
-      <Tabs.Screen 
-        name="checkout/index" 
-        options={{ 
-          href: null,
-          tabBarStyle: { display: 'none' } // Good UX to hide nav during checkout
-        }} 
-      />
-
-      <Tabs.Screen 
-        name="home/restaurant-details" 
-        options={{ 
-          href: null,
-          tabBarStyle: { display: 'none' },
-        }} 
-      />
-
+      {/* ── Hidden "tab" slots for folders that should not appear in the tab bar ── */}
       <Tabs.Screen
-        name="menu/[id]"
+        name="menu"
         options={{
-          href: null,
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
           tabBarStyle: { display: 'none' },
         }}
       />
 
+      <Tabs.Screen
+        name="checkout"
+        options={{
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
+          tabBarStyle: { display: 'none' },
+        }}
+      />
     </Tabs>
   );
 }

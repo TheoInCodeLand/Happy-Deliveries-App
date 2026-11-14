@@ -4,7 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const dotenv = require('dotenv');
 const http = require('http');
-// const socketIo = require('socket.io'); // Remove this unused line
+// const socketIo = require('socket.io'); // Remove this unused line 
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const session = require('express-session');
@@ -39,7 +39,7 @@ const io = new Server(server, {
 // ---------------------------------------------------------
 // 🚨 CRITICAL FIX: Make 'io' accessible to your Controllers
 // ---------------------------------------------------------
-app.set('io', io); 
+app.set('io', io);
 
 // Handle Connections
 io.on('connection', (socket) => {
@@ -57,6 +57,17 @@ io.on('connection', (socket) => {
     console.log(`Socket ${socket.id} joined restaurant managers room`);
   });
 
+  socket.on('join_manager', () => {
+    socket.join('restaurant_managers');
+    console.log(`Socket ${socket.id} joined restaurant managers room`);
+  });
+
+  socket.on('join_order', (orderId) => {
+    if (orderId) {
+      socket.join(`order_${orderId}`);
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });
@@ -65,7 +76,7 @@ io.on('connection', (socket) => {
 // Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100, 
+  max: 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 
@@ -79,10 +90,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 // 3. Setup Session (Required for Web Login)
 app.use(cookieParser());
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'manager_secret',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 }
+  secret: process.env.SESSION_SECRET || 'manager_secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 1000 * 60 * 60 * 24 }
 }));
 
 app.use('/api/', limiter);
@@ -99,10 +110,10 @@ app.use('/uploads', express.static('uploads'));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV 
+    environment: process.env.NODE_ENV
   });
 });
 
@@ -119,6 +130,13 @@ app.use('/api/manager', managerRoutes);
 
 const managerWebRoutes = require('./routes/managerWeb');
 app.use('/manager', managerWebRoutes);
+
+// Public Driver Registration Web Portal shortcuts (/driver, /driver/register, /driver/apply)
+app.get(['/driver', '/driver/register', '/driver/apply'], (req, res) => {
+  res.render('driver/register', {
+    title: 'Driver Registration Portal · Happy Delivery',
+  });
+});
 
 // Socket.io setup 
 require('./src/socket/index')(io);
@@ -158,5 +176,5 @@ process.on('unhandledRejection', (err) => {
     server.close(() => process.exit(1));
   }
 });
- 
+
 module.exports = { app, server }; 

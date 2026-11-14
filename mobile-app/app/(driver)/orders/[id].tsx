@@ -33,6 +33,8 @@ type Order = {
   id: string;
   order_number: string;
   status: string;
+  payment_status?: string;
+  payment_method?: string;
   subtotal: number;
   delivery_fee: number;
   tax_amount: number;
@@ -82,17 +84,70 @@ export default function DriverOrderDetailsScreen() {
     }
   };
 
-  // --- 2. Live GPS Socket Broadcaster ---
+  // Helper to get current GPS coordinates (with fallback to last known or restaurant location)
+  const getCurrentDriverCoords = async (): Promise<{ lat: number; lng: number } | undefined> => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const pos =
+          (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null)) ||
+          (await Location.getLastKnownPositionAsync().catch(() => null));
+        if (pos?.coords) {
+          return {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          };
+        }
+      }
+    } catch {
+      // ignore and try fallback
+    }
+
+    // Fallback to restaurant coordinates if GPS is unavailable on simulator/device
+    const rLoc = order?.restaurant_location;
+    if (rLoc && typeof rLoc === 'object') {
+      const lat = Number(rLoc.latitude ?? rLoc.y);
+      const lng = Number(rLoc.longitude ?? rLoc.x);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        return { lat, lng };
+      }
+    }
+    return undefined;
+  };
+
+  const broadcastDriverPosition = (lat: number, lng: number, accuracy?: number | null, speed?: number | null) => {
+    if (socket && order) {
+      socket.emit('driver_location_update', {
+        driverId: order.driver_id,
+        orderId: id,
+        location: [lng, lat],
+        latitude: lat,
+        longitude: lng,
+        accuracy: accuracy ?? null,
+        speed: speed ?? null,
+      });
+    }
+    driverService
+      .updateLocation(lat, lng, id, { accuracy: accuracy ?? null, speed: speed ?? null })
+      .catch(() => {});
+  };
+
+  // --- 2. Live GPS Socket + REST Broadcaster ---
   useEffect(() => {
     let isMounted = true;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
     const startTracking = async () => {
-      const activeStatuses = ['accepted_by_driver', 'picked_up', 'on_the_way'];
+      const activeStatuses = ['accepted_by_driver', 'picked_up', 'on_the_way', 'arrived'];
       
       // If the order is complete or not in an active transit state, KILL the tracker
-      if (!order || !activeStatuses.includes(order.status) || !socket) {
+      if (!order || !activeStatuses.includes(order.status)) {
         stopTracking();
         return;
+      }
+
+      if (socket && id) {
+        socket.emit('join_order', id);
       }
 
       // Prevent duplicate watchers if one is already running
@@ -100,7 +155,11 @@ export default function DriverOrderDetailsScreen() {
 
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'GPS permission is required to update the customer.');
+        // Still broadcast fallback restaurant location when picked_up so customer map works on emulators without GPS
+        const fallback = await getCurrentDriverCoords();
+        if (fallback && isMounted) {
+          broadcastDriverPosition(fallback.lat, fallback.lng);
+        }
         return;
       }
 
@@ -114,29 +173,48 @@ export default function DriverOrderDetailsScreen() {
         ])
       ).start();
 
+      // Send an immediate GPS ping as soon as tracking starts or status transitions to picked_up
+      const initialCoords = await getCurrentDriverCoords();
+      if (initialCoords && isMounted) {
+        broadcastDriverPosition(initialCoords.lat, initialCoords.lng);
+      }
+
       locationSubscription.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
           timeInterval: 3000,     // Ping every 3 seconds
-          distanceInterval: 10,   // OR every 10 meters moved (saves battery)
+          distanceInterval: 0,    // Always emit even for small movements so live map stays responsive
         },
         (location) => {
-          if (socket && isMounted) {
-            // Emits exactly the payload your backend index.js expects
-            socket.emit('driver_location_update', {
-              driverId: order.driver_id,
-              orderId: id,
-              location: [location.coords.longitude, location.coords.latitude],
-            });
+          if (isMounted) {
+            broadcastDriverPosition(
+              location.coords.latitude,
+              location.coords.longitude,
+              location.coords.accuracy,
+              location.coords.speed
+            );
           }
         }
       );
+
+      // Periodic heartbeat fallback every 5 seconds in case watchPositionAsync pauses on stationary emulator
+      heartbeatTimer = setInterval(async () => {
+        if (!isMounted) return;
+        const coords = await getCurrentDriverCoords();
+        if (coords && isMounted) {
+          broadcastDriverPosition(coords.lat, coords.lng);
+        }
+      }, 5000);
     };
 
     const stopTracking = () => {
       if (locationSubscription.current) {
         locationSubscription.current.remove();
         locationSubscription.current = null;
+      }
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
       }
       setIsLiveTracking(false);
       pulseAnim.setValue(1);
@@ -153,10 +231,30 @@ export default function DriverOrderDetailsScreen() {
 
 
   // --- 3. Order Actions ---
+  const handleAcceptAvailableOrder = async () => {
+    setUpdating(true);
+    try {
+      await driverService.acceptOrder(id);
+      const coords = await getCurrentDriverCoords();
+      if (coords) {
+        broadcastDriverPosition(coords.lat, coords.lng);
+      }
+      await fetchOrderDetails();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.error || 'Failed to accept order');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const handleUpdateStatus = async (newStatus: string) => {
     setUpdating(true);
     try {
-      await driverService.updateOrderStatus(id, newStatus);
+      const coords = await getCurrentDriverCoords();
+      await driverService.updateOrderStatus(id, newStatus, coords);
+      if (coords) {
+        broadcastDriverPosition(coords.lat, coords.lng);
+      }
       await fetchOrderDetails(); // Refresh to see changes and trigger/kill GPS
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.error || 'Failed to update status');
@@ -184,6 +282,9 @@ export default function DriverOrderDetailsScreen() {
 
   const getNextAction = () => {
     if (!order) return null;
+    if (!order.driver_id && ['ordering_at_restaurant', 'order_ready'].includes(order.status) && order.payment_status === 'completed') {
+      return { label: 'Accept Order', actionType: 'accept', icon: 'checkmark-circle' };
+    }
     switch (order.status) {
       case 'accepted_by_driver':
         return { label: 'Confirm Pick Up', status: 'picked_up', icon: 'cube' };
@@ -313,7 +414,9 @@ export default function DriverOrderDetailsScreen() {
           
           <View style={styles.divider} />
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total (Cash to Collect)</Text>
+            <Text style={styles.totalLabel}>
+              {order.payment_status === 'completed' ? 'Total (Paid)' : 'Total'}
+            </Text>
             <Text style={styles.totalValue}>R{Number(order.total_amount).toFixed(2)}</Text>
           </View>
         </View>
@@ -325,7 +428,11 @@ export default function DriverOrderDetailsScreen() {
         <View style={styles.footer}>
           <TouchableOpacity 
             style={styles.actionBtn}
-            onPress={() => nextAction.actionType === 'scan' ? handleScanDeliveryCode() : handleUpdateStatus(nextAction.status)}
+            onPress={() => {
+              if (nextAction.actionType === 'scan') handleScanDeliveryCode();
+              else if (nextAction.actionType === 'accept') handleAcceptAvailableOrder();
+              else if (nextAction.status) handleUpdateStatus(nextAction.status);
+            }}
             disabled={updating}
           >
             {updating ? (

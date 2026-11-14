@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useCartStore } from '../../../store/cartStore'; 
 import { orderService } from '../../../services/order'; 
@@ -20,6 +20,8 @@ import { colors } from '../../../constants/colors';
 
 export default function CheckoutScreen() {
   const router = useRouter();
+  const pathname = usePathname();
+  const isCheckoutFocused = pathname.includes('checkout');
   const { items, total, restaurantId, restaurantName, clearCart } = useCartStore();
   const [loading, setLoading] = useState(false);
 
@@ -32,22 +34,48 @@ export default function CheckoutScreen() {
   });
   
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'cash'>('card');
+  const orderSuccessRef = useRef(false);
 
-  // FIX: Move the redirect logic inside useEffect
+  // Wait for Zustand persist to finish loading from AsyncStorage before
+  // making any decisions about the cart.  This prevents the race where the
+  // store starts empty and we redirect the user back to the cart prematurely.
+  const [hydrated, setHydrated] = useState(() =>
+    useCartStore.persist.hasHydrated()
+  );
+
   useEffect(() => {
-    if (items.length === 0) {
+    if (useCartStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    const unsub = useCartStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+    return () => unsub();
+  }, []);
+
+  // Reset orderSuccessRef when new items are added to cart for a subsequent order
+  useEffect(() => {
+    if (items.length > 0) {
+      orderSuccessRef.current = false;
+    }
+  }, [items.length]);
+
+  // Redirect to cart if hydrated and cart is empty (unless order was just submitted)
+  useEffect(() => {
+    if (isCheckoutFocused && !orderSuccessRef.current && hydrated && items.length === 0) {
       router.replace('/(customer)/cart');
     }
-  }, [items, router]);
+  }, [isCheckoutFocused, hydrated, items.length]);
 
-  // If cart is empty, render nothing while redirecting
-  if (items.length === 0) {
+  // Show nothing while hydrating OR while redirecting (empty cart)
+  if (!hydrated || (!orderSuccessRef.current && hydrated && items.length === 0)) {
     return null;
   }
 
   const handlePlaceOrder = async () => {
     // 1. Input Validation
-    if (!address.street || !address.city) {
+    if (!address.street.trim() || !address.city.trim()) {
       return Alert.alert('Missing Address', 'Please enter your street and city.');
     }
 
@@ -63,9 +91,9 @@ export default function CheckoutScreen() {
         menu_item_id: item.menuItemId,
         quantity: item.quantity,
         unit_price: item.price,
-        special_instructions: item.instructions || '',
+        special_instructions: item.specialInstructions || (item as any).instructions || '',
         selected_options: item.selectedOptions || {},
-        allergen_notes: ''
+        allergen_notes: item.allergenNotes || ''
       }));
 
       // 3. Construct Payload
@@ -73,12 +101,13 @@ export default function CheckoutScreen() {
         restaurant_id: restaurantId,
         items: orderItems,
         delivery_address: {
-          street: address.street,
-          city: address.city,
-          zip: address.zip
+          street: address.street.trim(),
+          city: address.city.trim(),
+          zip: address.zip.trim()
         },
-        delivery_instructions: address.instructions,
+        delivery_instructions: address.instructions.trim(),
         special_instructions: "", 
+        payment_method: paymentMethod,
         subtotal: total.subtotal,
         delivery_fee: total.deliveryFee,
         tax_amount: total.tax,
@@ -89,31 +118,43 @@ export default function CheckoutScreen() {
       const response = await orderService.createOrder(orderPayload);
       
       // 5. Handle Success
+      orderSuccessRef.current = true;
       clearCart();
-      const orderId = response.data?.id || response.id;
-      
-      Alert.alert(
-        'Order Requested!', 
-        'We are finding a driver for you. You will be prompted to pay once a driver accepts.',
-        [{ 
-          text: 'OK', 
-          onPress: () => {
-            if (orderId) {
-               router.replace(`/(customer)/orders/${orderId}`);
-              //  router.replace('/(customer)/home'); 
-            } else {
-               router.replace('/(customer)/home');
-            }
-          } 
-        }]
-      );
+      setAddress({ street: '', city: '', zip: '', instructions: '' });
+      // API interceptor returns response.data directly; order ID may be nested
+      const orderId = (response as any)?.data?.id ?? (response as any)?.id ?? (response as any)?.order?.id;
+      const navigateAfterOrder = () => {
+        if (orderId) {
+          router.replace(`/(customer)/orders/${orderId}`);
+        } else {
+          router.replace('/(customer)/orders');
+        }
+      };
+
+      if (Platform.OS === 'web') {
+        Alert.alert(
+          'Order Sent to Restaurant!',
+          'Your order has been sent to the restaurant manager for approval. Once accepted, you will be able to complete payment.'
+        );
+        navigateAfterOrder();
+      } else {
+        Alert.alert(
+          'Order Sent to Restaurant!', 
+          'Your order has been sent to the restaurant manager for approval. Once accepted, you will be able to complete payment.',
+          [{ 
+            text: 'OK', 
+            onPress: navigateAfterOrder
+          }]
+        );
+      }
 
     } catch (error: any) {
       console.error('Checkout Error:', error);
-      Alert.alert(
-        'Order Failed', 
-        error.response?.data?.error || 'Could not place order. Please try again.'
-      );
+      const errorMessage =
+        typeof error === 'string'
+          ? error
+          : error?.response?.data?.error || error?.message || 'Could not place order. Please try again.';
+      Alert.alert('Order Failed', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -194,7 +235,7 @@ export default function CheckoutScreen() {
           {/* Section: Payment Method */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Payment Preference</Text>
-            <Text style={styles.sectionSubtitle}>You will pay after a driver accepts.</Text>
+            <Text style={styles.sectionSubtitle}>You will pay once the restaurant manager accepts your order.</Text>
             
             <View style={styles.card}>
               <TouchableOpacity

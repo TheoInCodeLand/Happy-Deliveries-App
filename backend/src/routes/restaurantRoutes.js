@@ -23,6 +23,7 @@ const {
 const { auth, authorize } = require('../middleware/auth');
 
 // 1. PUBLIC ROUTES - Specific paths first
+router.get('/feed/home', getHomeFeed);
 router.get('/search', searchRestaurants);
 router.get('/search/food', searchFood);
 router.get('/:restaurantId/menu-items/:itemId', getMenuItem); // Customer endpoint for menu item details
@@ -50,7 +51,6 @@ router.get('/:restaurantId/menus', getRestaurantMenus);
 
 router.post('/', auth, authorize('restaurant_manager'), createRestaurant);
 router.put('/:id', auth, authorize('restaurant_manager'), updateRestaurant);
-router.get('/feed/home', getHomeFeed);
 router.post('/:restaurantId/menus', auth, authorize('restaurant_manager'), createMenu);
 router.post('/:restaurantId/menus/:menuId/items', auth, authorize('restaurant_manager'), addMenuItem);
 

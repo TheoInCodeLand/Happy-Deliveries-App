@@ -90,6 +90,7 @@ class Restaurant {
       SELECT 
         r.id, r.name, r.description, r.cuisine_type, r.address, 
         r.total_ratings, r.logo_url, r.cover_image_url, r.opening_hours, r.preparation_time_minutes,
+        r.delivery_radius_km,
         ST_X(r.location::geometry) as longitude, -- Extract as float
         ST_Y(r.location::geometry) as latitude,  -- Extract as float
         ST_Distance(
@@ -98,11 +99,10 @@ class Restaurant {
         ) as distance_meters
       FROM restaurants r
       WHERE r.is_active = true
-      AND ST_DWithin(
+      AND ST_Distance(
         r.location::geography,
-        ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-        $3
-      )
+        ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
+      ) <= LEAST($3::numeric, COALESCE(r.delivery_radius_km * 1000, $3)::numeric)
     `;
 
     const values = [lng, lat, radiusMeters]; // Always [Longitude, Latitude] for PostGIS

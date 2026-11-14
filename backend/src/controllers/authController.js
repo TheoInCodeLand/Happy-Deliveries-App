@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Customer = require('../models/Customer');
 const Driver = require('../models/Driver');
 const RestaurantManager = require('../models/RestaurantManager');
+const EmailService = require('../utils/emailService');
 
 // Register user
 exports.register = async (req, res) => {
@@ -14,7 +15,15 @@ exports.register = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Email already registered' });
     }
     
-    const userData = { email, password, role, first_name, last_name, phone_number };
+    const userData = {
+      email,
+      password,
+      role,
+      first_name,
+      last_name,
+      phone_number,
+      is_active: role === 'driver' ? false : true,
+    };
     const user = await User.create(userData);
     
     // 3. Create the role-specific profile (wrapped in a try-catch to prevent core crash).
@@ -36,6 +45,36 @@ exports.register = async (req, res) => {
       return res.status(500).json({
         success: false,
         error: `Account created, but ${role} profile failed: ${profileError.message}`
+      });
+    }
+
+    if (role === 'driver') {
+      try {
+        await EmailService.sendDriverApplicationReceivedEmail(user, profile);
+      } catch (emailErr) {
+        console.warn('[authController.register] Driver application email warning:', emailErr.message);
+      }
+
+      const io = req.app?.get('io');
+      if (io) {
+        io.to('restaurant_managers').emit('new_driver_application', {
+          driver_id: profile?.id,
+          name: `${first_name} ${last_name}`,
+          email,
+          vehicle_type: profile?.vehicle_type,
+          created_at: new Date().toISOString(),
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        pending_approval: true,
+        message: 'Your driver application has been submitted and is pending admin approval. You will receive an email once your account is reviewed.',
+        data: {
+          pending_approval: true,
+          user: { id: user.id, email: user.email, role: user.role, first_name, last_name, phone_number, is_active: false },
+          profile,
+        }
       });
     }
     
@@ -90,6 +129,33 @@ exports.login = async (req, res) => {
       case 'restaurant_manager':
         profile = await RestaurantManager.findByUserId(user.id);
         break;
+    }
+
+    // Enforce Driver Application Approval Gate before allowing login to the driver app
+    if (user.role === 'driver') {
+      const approvalStatus = profile?.approval_status || (user.is_active === false ? 'pending' : 'approved');
+
+      if (approvalStatus === 'rejected') {
+        return res.status(403).json({
+          success: false,
+          code: 'DRIVER_REJECTED',
+          error: `Your driver application was not approved. Reason: ${profile?.rejection_reason || 'Please check your email or visit the Driver Registration Portal to update your application.'}`,
+          rejection_reason: profile?.rejection_reason || null,
+        });
+      }
+
+      if (approvalStatus === 'pending' || user.is_active === false) {
+        return res.status(403).json({
+          success: false,
+          code: 'DRIVER_PENDING_APPROVAL',
+          error: 'Your driver application is currently pending review by management. You will receive an email once your account is approved and ready to log in.',
+        });
+      }
+    } else if (user.is_active === false) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account is currently inactive. Please contact support.',
+      });
     }
     
     // Generate token

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -127,11 +127,23 @@ export default function CustomerHomeScreen() {
   });
 
   // --- Effects ---
+  // Track if we've already kicked off the first fetch so we don't double-load
+  const fetchedRef = useRef(false);
+
   useEffect(() => {
-    if (location) {
+    // Always attempt to load — use GPS coords if available, Johannesburg as fallback
+    if (!fetchedRef.current) {
+      fetchedRef.current = true;
       fetchAllData();
     }
-  }, [location]);
+  }, []);
+
+  // Re-fetch when we get real location after initially loading with the fallback
+  useEffect(() => {
+    if (location && fetchedRef.current) {
+      fetchAllData();
+    }
+  }, [location?.coords.latitude, location?.coords.longitude]);
 
   useEffect(() => {
     if (!loading) {
@@ -204,46 +216,79 @@ export default function CustomerHomeScreen() {
   const activeStatuses = ['accepted_by_driver', 'picked_up', 'on_the_way', 'arrived'];
 
   const fetchAllData = async () => {
-    if (!location) return;
-
     try {
       setLoading(true);
 
+      // Build parallel requests; only include location-based search when coords are available
+      // Use real GPS if within South Africa region; fallback to Johannesburg for emulators (e.g. Mountain View US)
+      let lat = location?.coords.latitude;
+      let lng = location?.coords.longitude;
+      if (lat == null || lng == null || lat > 0 || lng < 10 || lng > 40) {
+        lat = -26.2041;
+        lng = 28.0473;
+      }
+
       const [feedResponse, searchResponse, ordersResponse] = await Promise.all([
         restaurantService.getHomeFeed(),
-        restaurantService.searchRestaurants(
-          location.coords.latitude,
-          location.coords.longitude,
-          { maxDistance: 10 }
-        ),
+        restaurantService.searchRestaurants(lat, lng, { maxDistance: 10 }),
         orderService.getMyOrders(),
       ]);
 
-      const feedData = feedResponse;
-      if (feedData?.success) {
-        setMenus(feedData.data?.menus || []);
-        setDiscounts(feedData.data?.discounts || []);
-      }
+      // The api interceptor returns response.data directly, so feedResponse IS the data object
+      // It may have shape: { success: true, data: { menus: [], discounts: [] } }
+      // OR an array of restaurants (for search endpoint)
+      const feedData: any = feedResponse;
 
+      // Build the nearby restaurants list first so we can filter discounts/menus
       let restaurantData: any[] = [];
       const searchData = Array.isArray(searchResponse)
         ? searchResponse
-        : searchResponse?.data;
+        : (searchResponse as any)?.restaurants ?? (searchResponse as any)?.data ?? null;
       if (searchData && Array.isArray(searchData)) {
         restaurantData = searchData;
+      } else if (Array.isArray(feedData)) {
+        // Some backends return a flat array for the search endpoint
+        restaurantData = feedData;
       }
 
-      const normalizedRestaurants = restaurantData.map((restaurant: any) => ({
-        ...restaurant,
-        cuisine_type: normalizeCuisineType(restaurant.cuisine_type),
-      }));
+      // Ensure only restaurants strictly within delivery radius are displayed
+      const normalizedRestaurants = restaurantData
+        .filter((restaurant: any) => {
+          if (restaurant.distance_meters != null && restaurant.delivery_radius_km != null) {
+            return Number(restaurant.distance_meters) <= (Number(restaurant.delivery_radius_km) * 1000);
+          }
+          return true;
+        })
+        .map((restaurant: any) => ({
+          ...restaurant,
+          cuisine_type: normalizeCuisineType(restaurant.cuisine_type),
+        }));
 
       setRestaurants(normalizedRestaurants);
       setPopularRestaurants(
         normalizedRestaurants.filter((r: any) => (r.total_ratings || 0) > 0).slice(0, 5)
       );
 
-      const orderData = ordersResponse?.data || [];
+      // Filter menus and discounts to only show items from nearby restaurants
+      const nearbyIds = new Set(normalizedRestaurants.map((r: any) => r.id));
+      if (feedData && !Array.isArray(feedData) && feedData?.success) {
+        const allMenus: MenuCategory[] = feedData.data?.menus || [];
+        const allDiscounts: MenuItem[] = feedData.data?.discounts || [];
+        setMenus(nearbyIds.size > 0 ? allMenus.filter((m) => nearbyIds.has(m.restaurant_id)) : allMenus);
+        setDiscounts(nearbyIds.size > 0 ? allDiscounts.filter((d) => nearbyIds.has(d.restaurant_id)) : allDiscounts);
+      } else if (feedData && !Array.isArray(feedData)) {
+        // Try alternate shapes: feedData.menus / feedData.discounts
+        const allMenus: MenuCategory[] = feedData.menus || [];
+        const allDiscounts: MenuItem[] = feedData.discounts || [];
+        setMenus(nearbyIds.size > 0 ? allMenus.filter((m) => nearbyIds.has(m.restaurant_id)) : allMenus);
+        setDiscounts(nearbyIds.size > 0 ? allDiscounts.filter((d) => nearbyIds.has(d.restaurant_id)) : allDiscounts);
+      }
+
+      // ordersResponse is already response.data (interceptor strips the axios wrapper)
+      // The shape could be { orders: [...] } or just an array
+      const orderData: any[] = Array.isArray(ordersResponse)
+        ? ordersResponse
+        : (ordersResponse as any)?.orders ?? (ordersResponse as any)?.data ?? [];
       const active = orderData.filter((order: any) => activeStatuses.includes(order.status));
       setActiveOrders(active);
       setActiveOrder(active[0] || null);
@@ -821,7 +866,7 @@ export default function CustomerHomeScreen() {
               </View>
               <TouchableOpacity
                 style={styles.seeAllButton}
-                onPress={() => router.push('/(customer)/home/restaurants')}
+                onPress={() => router.push('/(customer)/search')}
               >
                 <Text style={styles.seeAllText}>Browse all</Text>
                 <Feather name="chevron-right" size={16} color={THEME.primary} />
@@ -893,7 +938,7 @@ export default function CustomerHomeScreen() {
             </View>
             <TouchableOpacity
               style={styles.seeAllButton}
-              onPress={() => router.push('/(customer)/home/restaurants')}
+              onPress={() => router.push('/(customer)/search')}
             >
               <Text style={styles.seeAllText}>More</Text>
               <Feather name="chevron-right" size={16} color={THEME.primary} />

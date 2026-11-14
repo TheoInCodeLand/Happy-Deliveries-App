@@ -5,45 +5,57 @@ const db = require('../config/database'); // Required for the raw delivery_track
 // Update driver location
 exports.updateLocation = async (req, res) => {
   try {
-    const { lat, lng, accuracy, speed } = req.body;
+    const lat = Number(req.body.lat ?? req.body.latitude);
+    const lng = Number(req.body.lng ?? req.body.longitude);
+    const { accuracy, speed, orderId } = req.body;
     
-    if (!lat || !lng) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       return res.status(400).json({
         success: false,
-        error: 'Latitude and longitude are required'
+        error: 'Valid latitude and longitude are required'
       });
     }
     
     const driver = await Driver.findByUserId(req.user.id);
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        error: 'Driver profile not found'
+      });
+    }
     
-    // 1. Update the current active location in the drivers table
+    // 1. Update the current active location in the drivers table (POINT(lng, lat))
     const updatedLocation = await Driver.updateLocation(driver.id, lat, lng);
     
-    // 2. CRITICAL FIX #3: Persist to delivery_tracking for historical analytics
+    // 2. Persist to delivery_tracking for active orders
     await db.query(
       `INSERT INTO delivery_tracking (order_id, driver_id, location, accuracy, speed)
        SELECT o.id, $1, POINT($2, $3), $4, $5
        FROM orders o
-       WHERE o.driver_id = $1 AND o.status IN ('accepted_by_driver', 'picked_up', 'on_the_way')`,
+       WHERE o.driver_id = $1 AND o.status IN ('accepted_by_driver', 'picked_up', 'on_the_way', 'arrived')`,
       [driver.id, lng, lat, accuracy || null, speed || null]
-    );
+    ).catch(() => {});
     
-    // 3. CRITICAL FIX #1: Broadcast the live location to the tracking customers
+    // 3. Broadcast the live location to the tracking customers
     const io = req.app.get('io');
     if (io) {
-      // Find all active orders for this driver to notify the correct rooms
       const orders = await db.query(
         `SELECT id FROM orders WHERE driver_id = $1 AND status IN ('accepted_by_driver', 'picked_up', 'on_the_way', 'arrived')`,
         [driver.id]
       );
       
-      // Blast the GPS coordinates directly to the customer's map
-      orders.rows.forEach(order => {
-        io.to(`order_${order.id}`).emit('driver_location', {
+      const targetOrderIds = new Set(orders.rows.map(o => o.id));
+      if (orderId) targetOrderIds.add(orderId);
+
+      targetOrderIds.forEach(targetId => {
+        io.to(`order_${targetId}`).emit('driver_location', {
           driverId: driver.id,
+          orderId: targetId,
           location: [lng, lat],
-          accuracy: accuracy,
-          speed: speed,
+          latitude: lat,
+          longitude: lng,
+          accuracy: accuracy ?? null,
+          speed: speed ?? null,
           timestamp: new Date().toISOString()
         });
       });
@@ -51,7 +63,11 @@ exports.updateLocation = async (req, res) => {
     
     res.json({
       success: true,
-      data: updatedLocation
+      data: {
+        ...updatedLocation,
+        latitude: lat,
+        longitude: lng
+      }
     });
   } catch (error) {
     console.error('Update location error:', error);

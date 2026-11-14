@@ -47,6 +47,10 @@
     .btn svg { width: 1rem; height: 1rem; }
     .btn-primary { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
     .btn-primary:hover { opacity: 0.9; }
+    .btn-success { background: #16a34a; color: #ffffff; }
+    .btn-success:hover { background: #15803d; }
+    .btn-danger { background: #dc2626; color: #ffffff; }
+    .btn-danger:hover { background: #b91c1c; }
     .btn-outline {
       background: transparent; border: 1px solid hsl(var(--input));
       color: hsl(var(--foreground));
@@ -386,6 +390,12 @@
           </a>
         </li>
         <li>
+          <a href="/manager/drivers" class="sidebar-menu-item">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></svg>
+            <span>Manage Drivers</span>
+          </a>
+        </li>
+        <li>
           <a href="/manager/analytics" class="sidebar-menu-item">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
             <span>Analytics</span>
@@ -677,7 +687,7 @@ const PAY_BADGES = {
 
 // ── Init ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('filterDate').value = todayISO();
+  document.getElementById('filterDate').value = '';
   loadStats();
   loadOrders(1);
   autoTimer = setInterval(() => { loadStats(); loadOrders(currentPage, true); }, 20000);
@@ -825,21 +835,23 @@ function renderOrders(orders) {
         <span class="badge ${payClass}">${fmtPayStatus(o.payment_status)}</span>
       </td>
       <td>
-        <span class="badge ${statusClass}">${fmtStatus(o.status)}</span>
+        <span class="badge ${statusClass}">${fmtStatus(o.status, o.payment_status)}</span>
       </td>
       <td>
         <div style="font-size:0.85rem;font-weight:500">${timeStr}</div>
         <div style="font-size:0.75rem;color:hsl(var(--muted-foreground))">${timeAgo}</div>
       </td>
       <td>
-        ${o.status === 'pending' ? `
-          <button class="btn btn-success btn-sm" onclick="publishOrder('${o.id}', this)">Publish</button>
-          <button class="btn btn-danger btn-sm ms-2" onclick="rejectOrder('${o.id}', this)">Reject</button>
-        ` : ''}
-        <button class="btn btn-primary btn-sm mt-2" onclick="openOrder('${o.id}')">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-          View
-        </button>
+        <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
+          ${o.status === 'pending' ? `
+            <button class="btn btn-success btn-sm" onclick="acceptOrder('${o.id}', this)">Accept</button>
+            <button class="btn btn-danger btn-sm" onclick="rejectOrder('${o.id}', this)">Reject</button>
+          ` : ''}
+          <button class="btn btn-primary btn-sm" onclick="openOrder('${o.id}')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            View
+          </button>
+        </div>
       </td>
     </tr>`;
   }).join('');
@@ -950,14 +962,14 @@ function renderOrderModal(order, items) {
 
   // Timeline
   const STATUS_STEPS = [
-    { key: 'pending',                label: 'Order Placed',          field: 'placed_at'              },
-    { key: 'accepted_by_driver',     label: 'Accepted by Driver',    field: 'accepted_at'            },
-    { key: 'ordering_at_restaurant', label: 'Driver at Restaurant',  field: 'restaurant_notified_at' },
-    { key: 'order_ready',            label: 'Order Ready',           field: 'ready_for_pickup_at'    },
-    { key: 'picked_up',              label: 'Picked Up',             field: 'picked_up_at'           },
-    { key: 'on_the_way',             label: 'On the Way',            field: null                     },
-    { key: 'arrived',                label: 'Arrived at Customer',   field: null                     },
-    { key: 'delivered',              label: 'Delivered',             field: 'delivered_at'           },
+    { key: 'pending',                label: 'Order Placed (Pending Approval)', field: 'placed_at'              },
+    { key: 'ordering_at_restaurant', label: order.payment_status === 'completed' ? 'Accepted & Paid (Finding Driver)' : 'Accepted by Restaurant (Awaiting Payment)', field: 'restaurant_notified_at' },
+    { key: 'accepted_by_driver',     label: 'Accepted by Driver',              field: 'accepted_at'            },
+    { key: 'order_ready',            label: 'Order Ready',                     field: 'ready_for_pickup_at'    },
+    { key: 'picked_up',              label: 'Picked Up',                       field: 'picked_up_at'           },
+    { key: 'on_the_way',             label: 'On the Way',                      field: null                     },
+    { key: 'arrived',                label: 'Arrived at Customer',             field: null                     },
+    { key: 'delivered',              label: 'Delivered',                       field: 'delivered_at'           },
   ];
   const currentStatusIdx = STATUS_STEPS.findIndex(s => s.key === order.status);
   const isCancelled    = order.status === 'cancelled' || order.status === 'no_drivers_available';
@@ -965,7 +977,7 @@ function renderOrderModal(order, items) {
   const timelineHtml = isCancelled
     ? `<div class="alert-danger">
          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px"><circle cx="12" cy="12" r="10"/><line x1="15" x2="9" y1="9" y2="15"/><line x1="9" x2="15" y1="9" y2="15"/></svg>
-         Order ${order.status === 'cancelled' ? 'cancelled' : 'could not find a driver'}
+         Order ${order.status === 'cancelled' ? 'rejected / cancelled' : 'could not find a driver'}
          ${order.cancelled_at ? `at ${fmtDateTime(order.cancelled_at)}` : ''}
        </div>`
     : `<ul class="timeline">
@@ -987,10 +999,23 @@ function renderOrderModal(order, items) {
 
   document.getElementById('orderModalBody').innerHTML = `
     <!-- Status -->
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
-      <span class="badge ${statusClass}" style="font-size:0.88rem; padding:7px 15px;">${fmtStatus(order.status)}</span>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem; flex-wrap:wrap; gap:0.5rem;">
+      <span class="badge ${statusClass}" style="font-size:0.88rem; padding:7px 15px;">${fmtStatus(order.status, order.payment_status)}</span>
       <span class="badge ${payClass}">${fmtPayStatus(order.payment_status)} · ${fmtPayMethod(order.payment_method)}</span>
     </div>
+
+    ${order.status === 'pending' ? `
+    <div style="display:flex; align-items:center; justify-content:space-between; background:hsl(var(--muted)); padding:1rem; border-radius:var(--radius); border:1px solid hsl(var(--border));">
+      <div>
+        <div style="font-weight:600; font-size:0.9rem;">Action Required: Approve or Reject Order</div>
+        <div style="font-size:0.8rem; color:hsl(var(--muted-foreground));">Accepting allows the customer to pay. Once paid, active drivers will be notified.</div>
+      </div>
+      <div style="display:flex; gap:0.5rem;">
+        <button class="btn btn-success btn-sm" onclick="acceptOrder('${order.id}', this)">Accept Order</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectOrder('${order.id}', this)">Reject Order</button>
+      </div>
+    </div>
+    ` : ''}
 
     <!-- Items -->
     <div class="modal-section-title">Items Ordered</div>
@@ -1054,7 +1079,7 @@ function applyFilters() { loadOrders(1); }
 function resetFilters() {
   document.getElementById('filterRestaurant').value = 'all';
   document.getElementById('filterStatus').value     = 'all';
-  document.getElementById('filterDate').value       = todayISO();
+  document.getElementById('filterDate').value       = '';
   loadOrders(1);
 }
 
@@ -1156,18 +1181,23 @@ function relativeTime(iso) {
 }
 
 const STATUS_LABELS = {
-  pending:                'Pending',
-  accepted_by_driver:     'Accepted',
-  ordering_at_restaurant: 'At Restaurant',
-  order_ready:            'Ready',
+  pending:                'Pending Approval',
+  accepted_by_driver:     'Driver Assigned',
+  ordering_at_restaurant: 'Accepted (Awaiting Payment)',
+  order_ready:            'Order Ready',
   picked_up:              'Picked Up',
   on_the_way:             'On the Way',
   arrived:                'Arrived',
   delivered:              'Delivered',
-  cancelled:              'Cancelled',
+  cancelled:              'Rejected / Cancelled',
   no_drivers_available:   'No Drivers',
 };
-function fmtStatus(s) { return STATUS_LABELS[s] || String(s || '').replace(/_/g,' '); }
+function fmtStatus(s, paymentStatus) {
+  if (s === 'ordering_at_restaurant') {
+    return paymentStatus === 'completed' ? 'Paid (Finding Driver)' : 'Accepted (Awaiting Payment)';
+  }
+  return STATUS_LABELS[s] || String(s || '').replace(/_/g,' ');
+}
 
 const PAY_LABELS = { pending:'Pending', processing:'Processing', completed:'Paid', failed:'Failed', refunded:'Refunded' };
 function fmtPayStatus(s) { return PAY_LABELS[s] || (s || 'Unknown'); }

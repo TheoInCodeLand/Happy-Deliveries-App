@@ -270,11 +270,21 @@ router.get(
 
 /**
  * @route   POST /api/manager/orders/:id/publish
- * @desc    Publish order to available drivers (make it visible to drivers)
+ * @desc    Accept order so customer can complete payment
  */
 router.post(
   '/orders/:id/publish',
   asyncHandler(managerController.publishOrder)
+);
+
+router.post(
+  '/orders/:id/accept',
+  asyncHandler(managerController.publishOrder)
+);
+
+router.post(
+  '/orders/:id/reject',
+  asyncHandler(managerController.rejectOrder)
 );
 
 module.exports = router;

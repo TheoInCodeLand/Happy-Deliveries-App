@@ -19,6 +19,7 @@ type Order = {
   id: string;
   order_number: string;
   status: string;
+  payment_status?: string;
   total_amount: number;
   placed_at: string;
   restaurant_name: string;
@@ -44,7 +45,11 @@ export default function OrdersScreen() {
     try {
       setLoading(true);
       const response = await orderService.getMyOrders();
-      setOrders(response.data || []);
+      // API interceptor returns response.data directly; shape may be array or {orders:[...]}
+      const orderList: Order[] = Array.isArray(response)
+        ? response
+        : (response as any)?.orders ?? (response as any)?.data ?? [];
+      setOrders(orderList);
     } catch (error) {
       console.error('Error fetching orders:', error);
     } finally {
@@ -79,17 +84,24 @@ export default function OrdersScreen() {
 
   const filters = [
     { key: 'all', label: 'All Orders' },
-    { key: 'pending', label: 'Active' },
+    { key: 'active', label: 'Active' },
     { key: 'delivered', label: 'Delivered' },
     { key: 'cancelled', label: 'Cancelled' },
   ];
 
-  const activeStatuses = ['accepted_by_driver', 'picked_up', 'on_the_way', 'arrived'];
-  const activeOrders = orders.filter(order => activeStatuses.includes(order.status));
+  const trackingStatuses = ['accepted_by_driver', 'picked_up', 'on_the_way', 'arrived'];
+  const allActiveStatuses = ['pending', 'ordering_at_restaurant', 'order_ready', ...trackingStatuses];
+  const activeOrders = orders.filter(order => trackingStatuses.includes(order.status));
+  const primaryTrackingOrder =
+    activeOrders.find(order => order.status === 'picked_up') ||
+    activeOrders.find(order => ['on_the_way', 'arrived'].includes(order.status)) ||
+    activeOrders[0];
 
   const filteredOrders = selectedFilter === 'all' 
     ? orders 
-    : orders.filter(order => order.status === selectedFilter);
+    : selectedFilter === 'active'
+      ? orders.filter(order => allActiveStatuses.includes(order.status))
+      : orders.filter(order => order.status === selectedFilter);
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
@@ -143,15 +155,23 @@ export default function OrdersScreen() {
         />
       </View>
 
-      {activeOrders.length > 0 && selectedFilter !== 'delivered' && selectedFilter !== 'cancelled' ? (
+      {primaryTrackingOrder && selectedFilter !== 'delivered' && selectedFilter !== 'cancelled' ? (
         <View style={styles.activeBanner}>
-          <Text style={styles.activeBannerTitle}>Active Delivery</Text>
-          <Text style={styles.activeBannerText}>Track your active order live from here.</Text>
+          <Text style={styles.activeBannerTitle}>
+            {primaryTrackingOrder.status === 'picked_up'
+              ? 'Order Picked Up • Driver Live on Map'
+              : 'Active Delivery'}
+          </Text>
+          <Text style={styles.activeBannerText}>
+            {primaryTrackingOrder.status === 'picked_up'
+              ? `Your driver has picked up order ${primaryTrackingOrder.order_number || ''}. Watch your driver live on the map.`
+              : 'Track your active order live from here.'}
+          </Text>
           <TouchableOpacity
             style={styles.activeBannerButton}
-            onPress={() => router.push(`/(customer)/orders/tracking?id=${activeOrders[0].id}`)}
+            onPress={() => router.push(`/(customer)/orders/tracking?id=${primaryTrackingOrder.id}`)}
           >
-            <Text style={styles.activeBannerButtonText}>Track Now</Text>
+            <Text style={styles.activeBannerButtonText}>Track Live on Map</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -171,8 +191,22 @@ export default function OrdersScreen() {
             >
               <OrderCard
                 order={item}
-                actionLabel={activeStatuses.includes(item.status) ? 'Track Order' : 'View Details'}
-                onActionPress={activeStatuses.includes(item.status) ? () => router.push(`/(customer)/orders/tracking?id=${item.id}`) : undefined}
+                actionLabel={
+                  item.status === 'ordering_at_restaurant' && item.payment_status !== 'completed'
+                    ? 'Pay with Paystack'
+                    : item.status === 'picked_up'
+                      ? 'Track Driver Live'
+                      : trackingStatuses.includes(item.status)
+                        ? 'Track Order'
+                        : 'View Details'
+                }
+                onActionPress={
+                  item.status === 'ordering_at_restaurant' && item.payment_status !== 'completed'
+                    ? () => router.push(`/(customer)/orders/${item.id}`)
+                    : trackingStatuses.includes(item.status)
+                      ? () => router.push(`/(customer)/orders/tracking?id=${item.id}`)
+                      : () => router.push(`/(customer)/orders/${item.id}`)
+                }
               />
             </TouchableOpacity>
           )}

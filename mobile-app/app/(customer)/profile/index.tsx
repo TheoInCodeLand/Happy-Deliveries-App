@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Image,
   Switch,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -29,15 +30,18 @@ export default function ProfileScreen() {
     if (hour < 18) return 'Good afternoon';
     return 'Good evening';
   };
+
+  const comingSoon = () =>
+    Alert.alert('Coming Soon', 'This feature will be available in a future update.');
   
   const menuItems = [
     {
       title: 'Account',
       icon: 'person-outline',
       items: [
-        { label: 'Personal Information', icon: 'person', action: () => router.push('/profile/edit') },
-        { label: 'Delivery Addresses', icon: 'location', action: () => router.push('/profile/addresses') },
-        { label: 'Payment Methods', icon: 'card', action: () => router.push('/profile/payments') },
+        { label: 'Personal Information', icon: 'person', action: comingSoon },
+        { label: 'Delivery Addresses', icon: 'location', action: comingSoon },
+        { label: 'Payment Methods', icon: 'card', action: comingSoon },
       ],
     },
     {
@@ -86,10 +90,10 @@ export default function ProfileScreen() {
       title: 'Support',
       icon: 'help-circle-outline',
       items: [
-        { label: 'Help Center', icon: 'help-circle', action: () => router.push('/support/help') },
-        { label: 'Contact Us', icon: 'chatbubble', action: () => router.push('/support/contact') },
-        { label: 'Privacy Policy', icon: 'shield-checkmark', action: () => router.push('/support/privacy') },
-        { label: 'Terms of Service', icon: 'document-text', action: () => router.push('/support/terms') },
+        { label: 'Help Center', icon: 'help-circle', action: comingSoon },
+        { label: 'Contact Us', icon: 'chatbubble', action: comingSoon },
+        { label: 'Privacy Policy', icon: 'shield-checkmark', action: comingSoon },
+        { label: 'Terms of Service', icon: 'document-text', action: comingSoon },
       ],
     },
   ];
@@ -133,7 +137,7 @@ export default function ProfileScreen() {
           
           <TouchableOpacity 
             style={styles.editButton}
-            onPress={() => router.push('/profile/edit')}
+            onPress={comingSoon}
           >
             <Feather name="edit-2" size={20} color={colors.primary} />
           </TouchableOpacity>

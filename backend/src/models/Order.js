@@ -1,6 +1,38 @@
 const db = require('../config/database');
 const crypto = require('crypto');
-const { emitOrderUpdate } = require('../socket');
+const { emitOrderUpdate, emitDriverLocation } = require('../socket');
+
+function normalizePointCoords(pt) {
+  if (!pt) return null;
+  let x = null;
+  let y = null;
+  if (Array.isArray(pt) && pt.length >= 2) {
+    x = Number(pt[0]);
+    y = Number(pt[1]);
+  } else if (typeof pt === 'object') {
+    if (pt.latitude !== undefined && pt.longitude !== undefined) {
+      x = Number(pt.longitude);
+      y = Number(pt.latitude);
+    } else if (pt.x !== undefined && pt.y !== undefined) {
+      x = Number(pt.x);
+      y = Number(pt.y);
+    }
+  }
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  if (x === 0 && y === 0) return null;
+  // Auto-correct if lat/lng were historically stored reversed (e.g. South Africa lat ~ -22..-35, lng ~ 16..33)
+  if (x < 0 && y > 0) {
+    const tmp = x;
+    x = y;
+    y = tmp;
+  }
+  return {
+    x,
+    y,
+    longitude: x,
+    latitude: y
+  };
+}
 
 class Order {
   // Create new order
@@ -11,6 +43,7 @@ class Order {
       special_instructions,
       delivery_instructions,
       delivery_address,
+      payment_method = 'card',
       subtotal,
       delivery_fee,
       tax_amount,
@@ -18,7 +51,8 @@ class Order {
     } = orderData;
     
     // Calculate total
-    const total_amount = subtotal + delivery_fee + tax_amount + tip_amount;
+    const total_amount = Number(subtotal) + Number(delivery_fee) + Number(tax_amount) + Number(tip_amount || 0);
+    const order_number = `ORD-${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
     
     // Start transaction
     const client = await db.pool.connect();
@@ -29,11 +63,13 @@ class Order {
       // Create order
       const orderQuery = `
         INSERT INTO orders (
+          order_number,
           customer_id,
           restaurant_id,
           special_instructions,
           delivery_instructions,
           delivery_address,
+          payment_method,
           subtotal,
           delivery_fee,
           tax_amount,
@@ -41,20 +77,22 @@ class Order {
           total_amount,
           status,
           driver_acceptance_deadline
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', NOW() + INTERVAL '150 seconds')
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', NOW() + INTERVAL '150 seconds')
         RETURNING *
       `;
       
       const orderResult = await client.query(orderQuery, [
+        order_number,
         customerId,
         restaurant_id,
         special_instructions,
         delivery_instructions,
         JSON.stringify(delivery_address),
-        subtotal,
-        delivery_fee,
-        tax_amount,
-        tip_amount,
+        payment_method,
+        Number(subtotal),
+        Number(delivery_fee),
+        Number(tax_amount),
+        Number(tip_amount || 0),
         total_amount
       ]);
       
@@ -126,7 +164,9 @@ class Order {
         r.address as restaurant_address,
         r.phone_number as restaurant_phone,
         r.logo_url as restaurant_logo,
-        r.location as restaurant_location, -- Ensure this is selected
+        r.location as restaurant_location,
+        CASE WHEN r.location IS NOT NULL THEN ST_X(r.location::geometry) ELSE NULL END as restaurant_lng,
+        CASE WHEN r.location IS NOT NULL THEN ST_Y(r.location::geometry) ELSE NULL END as restaurant_lat,
         c.first_name as customer_first_name,
         c.last_name as customer_last_name,
         c.phone_number as customer_phone,
@@ -140,6 +180,7 @@ class Order {
         d.vehicle_color as driver_vehicle_color,
         d.vehicle_registration as driver_vehicle_plate,
         d.current_location as driver_location,
+        d.last_location_update as driver_last_location_update,
         o.verification_code,
         o.code_expires_at,
         o.code_used_at
@@ -160,7 +201,7 @@ class Order {
         query += ` AND o.customer_id = (SELECT id FROM customers WHERE user_id = $2)`;
         params.push(userId);
         } else if (userRole === 'driver') {
-        query += ` AND o.driver_id = (SELECT id FROM drivers WHERE user_id = $2)`;
+        query += ` AND (o.driver_id = (SELECT id FROM drivers WHERE user_id = $2) OR (o.driver_id IS NULL AND o.status IN ('ordering_at_restaurant', 'order_ready') AND o.payment_status = 'completed'))`;
         params.push(userId);
         } else if (userRole === 'restaurant_manager') {
         query += ` AND o.restaurant_id IN (SELECT id FROM restaurants WHERE manager_id = (SELECT id FROM restaurant_managers WHERE user_id = $2))`;
@@ -169,7 +210,52 @@ class Order {
     }
     
     const result = await db.query(query, params);
-    return result.rows[0];
+    const row = result.rows[0];
+    if (!row) return undefined;
+
+    // Normalize restaurant_location from PostGIS ST_X / ST_Y so clients can parse { x, y, latitude, longitude } directly
+    if (Number.isFinite(Number(row.restaurant_lng)) && Number.isFinite(Number(row.restaurant_lat))) {
+      const rCoords = normalizePointCoords({
+        x: Number(row.restaurant_lng),
+        y: Number(row.restaurant_lat)
+      });
+      if (rCoords) {
+        row.restaurant_location = rCoords;
+      }
+    }
+
+    // Normalize driver_location (and fall back to latest delivery_tracking or restaurant location when picked_up)
+    let normalizedDriverLoc = normalizePointCoords(row.driver_location);
+    if (!normalizedDriverLoc && row.driver_id) {
+      try {
+        const trackRes = await db.query(
+          `SELECT location, created_at FROM delivery_tracking WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1`,
+          [orderId]
+        );
+        if (trackRes.rows[0]?.location) {
+          normalizedDriverLoc = normalizePointCoords(trackRes.rows[0].location);
+        }
+      } catch {
+        // ignore if delivery_tracking table or rows unavailable
+      }
+    }
+
+    // If order is picked_up or accepted_by_driver and driver has not sent GPS coordinates yet, default to restaurant coordinates
+    if (
+      !normalizedDriverLoc &&
+      ['accepted_by_driver', 'picked_up', 'on_the_way'].includes(row.status) &&
+      row.restaurant_location &&
+      typeof row.restaurant_location === 'object' &&
+      Number.isFinite(row.restaurant_location.latitude)
+    ) {
+      normalizedDriverLoc = { ...row.restaurant_location };
+    }
+
+    if (normalizedDriverLoc) {
+      row.driver_location = normalizedDriverLoc;
+    }
+
+    return row;
   }
 
   // Get order items
@@ -392,14 +478,13 @@ class Order {
     }
   }
 
-  // Manager publishes order to available drivers
-  static async publishOrder(orderId, managerId) {
+  // Manager accepts order (allows customer to pay; does NOT publish to drivers until payment is completed)
+  static async acceptByManager(orderId, managerId) {
     const client = await db.pool.connect();
-    
+
     try {
       await client.query('BEGIN');
-      
-      // Verify manager owns this order's restaurant
+
       const authQuery = `
         SELECT o.* FROM orders o
         WHERE o.id = $1
@@ -407,96 +492,272 @@ class Order {
             SELECT id FROM restaurants 
             WHERE manager_id = (SELECT id FROM restaurant_managers WHERE user_id = $2)
           )
-          AND o.status = 'pending'
       `;
-      
       const authResult = await client.query(authQuery, [orderId, managerId]);
-      
+
       if (authResult.rows.length === 0) {
         throw new Error('Order not found or invalid manager authorization');
       }
-      
-      const order = authResult.rows[0];
-      const restaurantId = order.restaurant_id;
-      
-      // Get restaurant location
-      const restaurantQuery = 'SELECT location FROM restaurants WHERE id = $1';
-      const restaurantResult = await client.query(restaurantQuery, [restaurantId]);
-      const restaurantLocation = restaurantResult.rows[0].location;
-      
-      // Safe coordinate extraction
-      let lng, lat;
-      if (typeof restaurantLocation === 'string' && restaurantLocation.startsWith('0101')) {
-        const locQuery = `
-          SELECT ST_X(location::geometry) as lng, ST_Y(location::geometry) as lat 
-          FROM restaurants WHERE id = $1
-        `;
-        const locRes = await client.query(locQuery, [restaurantId]);
-        lng = locRes.rows[0].lng;
-        lat = locRes.rows[0].lat;
-      } else {
-        [lng, lat] = restaurantLocation.replace(/[()]/g, '').split(',').map(Number);
+
+      const existingOrder = authResult.rows[0];
+      if (existingOrder.status === 'cancelled') {
+        throw new Error('Cannot accept a cancelled order');
       }
-      
-      // Find available drivers near restaurant
-      const driversQuery = `
-        SELECT d.id
-        FROM drivers d
-        WHERE d.is_available = true
-          AND d.current_status = 'available'
-          AND ST_DWithin(
-            ST_SetSRID(ST_MakePoint(d.current_location[0], d.current_location[1]), 4326)::geography,
-            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-            10000
-          )
-      `;
-      
-      const driversResult = await client.query(driversQuery, [lng, lat]);
-      const driverIds = driversResult.rows.map(row => row.id);
-      
-      // Publish order: activate queue and populate available drivers
-      await client.query(
-        `UPDATE driver_order_queue 
-         SET available_driver_ids = $1, is_active = true, expires_at = NOW() + INTERVAL '150 seconds'
-         WHERE order_id = $2`,
-        [driverIds.length > 0 ? driverIds : [], orderId]
+      if (existingOrder.status !== 'pending') {
+        throw new Error(`Order is already ${existingOrder.status.replace(/_/g, ' ')}`);
+      }
+
+      const updateResult = await client.query(
+        `UPDATE orders
+         SET status = 'ordering_at_restaurant',
+             restaurant_notified_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING *`,
+        [orderId]
       );
-      
+      const updatedOrder = updateResult.rows[0];
+
+      // Keep driver queue inactive until customer completes payment
+      await client.query(
+        `UPDATE driver_order_queue
+         SET is_active = false
+         WHERE order_id = $1`,
+        [orderId]
+      );
+
+      const userRes = await client.query(
+        'SELECT user_id FROM customers WHERE id = $1',
+        [updatedOrder.customer_id]
+      );
+      const customerUserId = userRes.rows[0]?.user_id;
+
       await client.query('COMMIT');
-      
+
       if (emitOrderUpdate) {
         emitOrderUpdate(orderId, {
-          type: 'order_published',
-          order,
-          available_drivers: driverIds.length
+          type: 'order_accepted_by_manager',
+          order: updatedOrder,
+          new_status: 'ordering_at_restaurant'
         });
       }
-      
-      // Get manager user ID for notification
-      const managerRes = await db.query(
-        'SELECT user_id FROM restaurant_managers WHERE user_id = $1',
-        [managerId]
-      );
-      
-      if (managerRes.rows.length > 0) {
+
+      if (customerUserId) {
         await this.createNotification(
-          managerId,
-          'restaurant_manager',
-          'Order Published',
-          `Order has been published to ${driverIds.length} available drivers`,
-          'order_published',
-          { order_id: orderId, available_drivers: driverIds.length }
+          customerUserId,
+          'customer',
+          'Order Accepted by Restaurant',
+          'The restaurant accepted your order! Please complete your payment so we can dispatch a driver.',
+          'order_accepted_by_manager',
+          { order_id: orderId, status: 'ordering_at_restaurant' }
         );
       }
-      
-      return order;
-      
+
+      return updatedOrder;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
     } finally {
       client.release();
     }
+  }
+
+  // Manager rejects order (cancels order completely and makes it unavailable)
+  static async rejectByManager(orderId, managerId) {
+    const client = await db.pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const authQuery = `
+        SELECT o.* FROM orders o
+        WHERE o.id = $1
+          AND o.restaurant_id IN (
+            SELECT id FROM restaurants 
+            WHERE manager_id = (SELECT id FROM restaurant_managers WHERE user_id = $2)
+          )
+      `;
+      const authResult = await client.query(authQuery, [orderId, managerId]);
+
+      if (authResult.rows.length === 0) {
+        throw new Error('Order not found or invalid manager authorization');
+      }
+
+      const existingOrder = authResult.rows[0];
+      if (existingOrder.status === 'delivered') {
+        throw new Error('Cannot reject a delivered order');
+      }
+
+      const updateResult = await client.query(
+        `UPDATE orders
+         SET status = 'cancelled',
+             cancelled_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING *`,
+        [orderId]
+      );
+      const updatedOrder = updateResult.rows[0];
+
+      await client.query(
+        `UPDATE driver_order_queue
+         SET is_active = false,
+             completed_at = CURRENT_TIMESTAMP
+         WHERE order_id = $1`,
+        [orderId]
+      );
+
+      const userRes = await client.query(
+        'SELECT user_id FROM customers WHERE id = $1',
+        [updatedOrder.customer_id]
+      );
+      const customerUserId = userRes.rows[0]?.user_id;
+
+      await client.query('COMMIT');
+
+      if (emitOrderUpdate) {
+        emitOrderUpdate(orderId, {
+          type: 'order_rejected_by_manager',
+          order: updatedOrder,
+          new_status: 'cancelled'
+        });
+      }
+
+      if (customerUserId) {
+        await this.createNotification(
+          customerUserId,
+          'customer',
+          'Order Rejected',
+          'Sorry, the restaurant rejected your order and it has been cancelled.',
+          'order_cancelled',
+          { order_id: orderId, status: 'cancelled' }
+        );
+      }
+
+      return updatedOrder;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // Complete customer payment and publish order to active drivers
+  static async completePaymentAndPublishToDrivers(orderId, paymentMethod = null) {
+    const client = await db.pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const orderRes = await client.query(
+        `SELECT * FROM orders WHERE id = $1 FOR UPDATE`,
+        [orderId]
+      );
+      if (orderRes.rows.length === 0) {
+        throw new Error('Order not found');
+      }
+
+      const existingOrder = orderRes.rows[0];
+      if (existingOrder.status === 'cancelled') {
+        throw new Error('This order was cancelled and cannot be paid for');
+      }
+      if (existingOrder.status === 'pending') {
+        throw new Error('Order must be accepted by the restaurant manager before payment');
+      }
+
+      const updateOrderRes = await client.query(
+        `UPDATE orders
+         SET payment_status = 'completed',
+             payment_method = COALESCE($2, payment_method),
+             driver_acceptance_deadline = NOW() + INTERVAL '600 seconds',
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING *`,
+        [orderId, paymentMethod]
+      );
+      const updatedOrder = updateOrderRes.rows[0];
+
+      // Find available active drivers (include drivers near restaurant or all available drivers if coordinates are unset)
+      const driversQuery = `
+        SELECT d.id
+        FROM drivers d
+        CROSS JOIN restaurants r
+        WHERE r.id = $1
+          AND d.is_available = true
+          AND d.current_status = 'available'
+          AND (
+            d.current_location IS NULL
+            OR r.location IS NULL
+            OR ST_DWithin(
+              ST_SetSRID(ST_MakePoint(d.current_location[0], d.current_location[1]), 4326)::geography,
+              r.location::geography,
+              50000
+            )
+          )
+      `;
+      const driversResult = await client.query(driversQuery, [updatedOrder.restaurant_id]);
+      const driverIds = driversResult.rows.map(row => row.id);
+
+      const queueUpdateRes = await client.query(
+        `UPDATE driver_order_queue
+         SET available_driver_ids = $1,
+             is_active = true,
+             expires_at = NOW() + INTERVAL '600 seconds',
+             completed_at = NULL
+         WHERE order_id = $2
+         RETURNING *`,
+        [driverIds.length > 0 ? driverIds : [], orderId]
+      );
+
+      if (queueUpdateRes.rows.length === 0) {
+        await client.query(
+          `INSERT INTO driver_order_queue (order_id, available_driver_ids, is_active, expires_at)
+           VALUES ($1, $2, true, NOW() + INTERVAL '600 seconds')`,
+          [orderId, driverIds.length > 0 ? driverIds : []]
+        );
+      }
+
+      const userRes = await client.query(
+        'SELECT user_id FROM customers WHERE id = $1',
+        [updatedOrder.customer_id]
+      );
+      const customerUserId = userRes.rows[0]?.user_id;
+
+      await client.query('COMMIT');
+
+      if (emitOrderUpdate) {
+        emitOrderUpdate(orderId, {
+          type: 'payment_completed',
+          order: updatedOrder,
+          payment_status: 'completed',
+          available_drivers: driverIds.length
+        });
+      }
+
+      if (customerUserId) {
+        await this.createNotification(
+          customerUserId,
+          'customer',
+          'Payment Confirmed',
+          'Your payment was successful! Your order is now visible to active drivers.',
+          'payment_completed',
+          { order_id: orderId, available_drivers: driverIds.length }
+        );
+      }
+
+      return updatedOrder;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // Manager publishes/accepts order
+  static async publishOrder(orderId, managerId) {
+    return this.acceptByManager(orderId, managerId);
   }
 
   // Driver accepts order
@@ -511,7 +772,9 @@ class Order {
         FROM orders o
         JOIN driver_order_queue q ON o.id = q.order_id
         WHERE o.id = $1 
-          AND o.status = 'pending'
+          AND o.status IN ('ordering_at_restaurant', 'order_ready')
+          AND o.payment_status = 'completed'
+          AND o.driver_id IS NULL
           AND q.is_active = true
           AND q.expires_at > NOW()
       `;
@@ -597,7 +860,7 @@ class Order {
   }
 
   // Update order status
-  static async updateStatus(orderId, status, driverId = null) {
+  static async updateStatus(orderId, status, driverId = null, locationCoords = null) {
     const validStatuses = [
       'pending',
       'accepted_by_driver',
@@ -650,15 +913,85 @@ class Order {
     const order = result.rows[0];
     
     if (order) {
-      if (['on_the_way', 'arrived'].includes(status)) {
+      if (status === 'cancelled') {
+        await db.query(
+          `UPDATE driver_order_queue SET is_active = false, completed_at = CURRENT_TIMESTAMP WHERE order_id = $1`,
+          [order.id]
+        );
+      }
+
+      if (['picked_up', 'on_the_way', 'arrived'].includes(status)) {
         await this.ensureVerificationCode(order.id);
+      }
+
+      // Ensure driver location is recorded & broadcast when order is picked_up / on_the_way / arrived
+      const activeDriverId = driverId || order.driver_id;
+      let driverCoords = null;
+
+      if (activeDriverId && ['accepted_by_driver', 'picked_up', 'on_the_way', 'arrived'].includes(status)) {
+        if (locationCoords && Number.isFinite(Number(locationCoords.lat)) && Number.isFinite(Number(locationCoords.lng))) {
+          const lat = Number(locationCoords.lat);
+          const lng = Number(locationCoords.lng);
+          await db.query(
+            `UPDATE drivers SET current_location = POINT($2, $3), last_location_update = NOW() WHERE id = $1`,
+            [activeDriverId, lng, lat]
+          ).catch(() => {});
+          await db.query(
+            `INSERT INTO delivery_tracking (order_id, driver_id, location) VALUES ($1, $2, POINT($3, $4))`,
+            [order.id, activeDriverId, lng, lat]
+          ).catch(() => {});
+          driverCoords = { latitude: lat, longitude: lng, x: lng, y: lat };
+        } else {
+          // Check driver's current location in DB; if null, initialize from restaurant location on picked_up
+          const locRes = await db.query(
+            `SELECT
+               d.current_location,
+               CASE WHEN r.location IS NOT NULL THEN ST_X(r.location::geometry) ELSE NULL END as restaurant_lng,
+               CASE WHEN r.location IS NOT NULL THEN ST_Y(r.location::geometry) ELSE NULL END as restaurant_lat
+             FROM orders o
+             LEFT JOIN drivers d ON o.driver_id = d.id
+             LEFT JOIN restaurants r ON o.restaurant_id = r.id
+             WHERE o.id = $1`,
+            [order.id]
+          ).catch(() => ({ rows: [] }));
+          const row = locRes.rows[0];
+          driverCoords = normalizePointCoords(row?.current_location);
+
+          if (!driverCoords && Number.isFinite(Number(row?.restaurant_lng)) && Number.isFinite(Number(row?.restaurant_lat))) {
+            const rLng = Number(row.restaurant_lng);
+            const rLat = Number(row.restaurant_lat);
+            driverCoords = normalizePointCoords({ x: rLng, y: rLat });
+            if (driverCoords) {
+              await db.query(
+                `UPDATE drivers SET current_location = POINT($2, $3), last_location_update = NOW() WHERE id = $1 AND current_location IS NULL`,
+                [activeDriverId, driverCoords.longitude, driverCoords.latitude]
+              ).catch(() => {});
+            }
+          }
+        }
       }
 
       if (emitOrderUpdate) {
         emitOrderUpdate(order.id, {
-            type: 'status_update',
-            order,
-            new_status: status
+          type: 'status_update',
+          order: {
+            ...order,
+            ...(driverCoords ? { driver_location: driverCoords } : {})
+          },
+          status,
+          new_status: status,
+          driver_location: driverCoords
+        });
+      }
+
+      if (emitDriverLocation && driverCoords) {
+        emitDriverLocation(order.id, {
+          driverId: activeDriverId,
+          orderId: order.id,
+          location: [driverCoords.longitude, driverCoords.latitude],
+          latitude: driverCoords.latitude,
+          longitude: driverCoords.longitude,
+          timestamp: new Date().toISOString()
         });
       }
       
@@ -680,11 +1013,17 @@ class Order {
       const customerUserId = userRes.rows[0]?.user_id;
 
       if (customerUserId) {
+        const statusTitle = status === 'picked_up'
+          ? 'Order Picked Up — Track Live!'
+          : 'Order Update';
+        const statusBody = status === 'picked_up'
+          ? 'Your driver has picked up your order! Open live tracking to watch your driver on the map.'
+          : `Your order status has changed to: ${status.replace(/_/g, ' ')}`;
         await this.createNotification(
           customerUserId,
           'customer',
-          'Order Update',
-          `Your order status has changed to: ${status.replace(/_/g, ' ')}`,
+          statusTitle,
+          statusBody,
           'status_update',
           { order_id: orderId, status }
         );
@@ -773,7 +1112,7 @@ class Order {
   static async processExpiredOrders() {
     const query = `
       UPDATE orders o SET status = 'no_drivers_available', updated_at = CURRENT_TIMESTAMP
-      FROM driver_order_queue q WHERE o.id = q.order_id AND q.is_active = true AND q.expires_at <= NOW() AND o.status = 'pending' RETURNING o.*
+      FROM driver_order_queue q WHERE o.id = q.order_id AND q.is_active = true AND q.expires_at <= NOW() AND o.status IN ('pending', 'ordering_at_restaurant', 'order_ready') AND o.driver_id IS NULL RETURNING o.*
     `;
     const result = await db.query(query);
     if (result.rows.length > 0) {

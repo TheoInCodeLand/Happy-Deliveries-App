@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -83,7 +83,7 @@ export default function MenuItemDetailScreen() {
   const fetchMenuItemDetails = async () => {
     try {
       const response = await restaurantService.getMenuItemDetail(restaurantId, id);
-      const data = response.data || response;
+      const data = (response as any)?.item ?? (response as any)?.data ?? response;
       setMenuItem({
         id: data.id,
         name: data.name,
@@ -108,7 +108,7 @@ export default function MenuItemDetailScreen() {
   const fetchRestaurantDetails = async () => {
     try {
       const response = await restaurantService.getRestaurant(restaurantId);
-      setRestaurant(response.data || response);
+      setRestaurant((response as any)?.restaurant ?? (response as any)?.data ?? response);
     } catch (error) {
       console.error('Error fetching restaurant details:', error);
     }

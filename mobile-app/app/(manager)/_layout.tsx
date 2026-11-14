@@ -6,6 +6,7 @@ import { colors } from '../../constants/colors';
 export default function ManagerLayout() {
   return (
     <Tabs
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         tabBarStyle: styles.tabBar,
@@ -78,49 +79,56 @@ export default function ManagerLayout() {
       <Tabs.Screen 
         name="restaurants/create" 
         options={{ 
-          href: null 
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }} 
       />
 
       <Tabs.Screen 
         name="restaurants/[id]/menus/[menuId]/add-item" 
         options={{ 
-          href: null 
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }} 
       />
 
       <Tabs.Screen 
         name="restaurants/[id]/edit" 
         options={{ 
-          href: null 
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }} 
       />
 
       <Tabs.Screen 
         name="restaurants/[id]/index" 
         options={{ 
-          href: null 
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }} 
       />
 
       <Tabs.Screen 
         name="restaurants/[id]/menus/index" 
         options={{ 
-          href: null 
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }} 
       />
 
       <Tabs.Screen 
         name="restaurants/[id]/menus/create" 
         options={{ 
-          href: null 
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }} 
       />
 
       <Tabs.Screen 
         name="restaurants/[id]/menus/[menuId]/items/[itemId]/edit" 
         options={{ 
-          href: null 
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }} 
       />
 

@@ -74,7 +74,8 @@ export default function RestaurantDetailsScreen() {
   const fetchRestaurantDetails = async () => {
     try {
       const response = await restaurantService.getRestaurant(id);
-      setRestaurant(response.data || response);
+      // API interceptor returns response.data directly
+      setRestaurant((response as any).restaurant ?? (response as any).data ?? response);
     } catch (error) {
       console.error('Error fetching restaurant:', error);
     }
@@ -83,7 +84,9 @@ export default function RestaurantDetailsScreen() {
   const fetchMenuItems = async () => {
     try {
       const response = await restaurantService.getRestaurantMenus(id);
-      const menus = response.data || [];
+      // API interceptor returns response.data directly; shape may be array or {menus: [...]}
+      const menus: any[] = Array.isArray(response) ? response
+        : ((response as any).menus ?? (response as any).data ?? []);
       
       const allItems: MenuItemType[] = [];
 
@@ -136,7 +139,7 @@ export default function RestaurantDetailsScreen() {
   }, [selectedCategory, menuItems]);
 
   // --- LOGIC: Cart Conflict Handling ---
-  const handleAddToCart = (item: MenuItemType) => {
+  const handleAddToCart = (item: any) => {
     if (!restaurant) return;
 
     // Check if user is ordering from a different restaurant
@@ -165,7 +168,7 @@ export default function RestaurantDetailsScreen() {
   };
 
   // Helper to actually add the item
-  const addCreateItem = (item: MenuItemType) => {
+  const addCreateItem = (item: any) => {
     if (!restaurant) return;
     
     setCartRestaurant(id, restaurant.name);
@@ -176,7 +179,9 @@ export default function RestaurantDetailsScreen() {
       name: item.name,
       description: item.description,
       price: item.discounted_price || item.price,
-      quantity: 1,
+      quantity: item.quantity || 1,
+      specialInstructions: item.specialInstructions,
+      selectedOptions: item.selectedOptions,
       imageUrl: item.image_url,
     });
   };
@@ -332,7 +337,7 @@ export default function RestaurantDetailsScreen() {
                 key={item.id}
                 item={item}
                 restaurantId={id}
-                onAddToCart={() => handleAddToCart(item)}
+                onAddToCart={(cartItem: any) => handleAddToCart(cartItem || item)}
               />
             ))
           )}

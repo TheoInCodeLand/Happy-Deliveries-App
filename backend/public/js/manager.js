@@ -48,6 +48,7 @@ class ManagerDashboard {
 
         this.socket.on('connect', () => {
             console.log('Socket.IO connected');
+            this.socket.emit('join_manager_room');
             const managerId = window.managerId || null;
             if (managerId) {
                 this.socket.emit('join_manager', managerId);
@@ -55,26 +56,31 @@ class ManagerDashboard {
         });
 
         this.socket.on('new_order', (payload) => {
-            const { order } = payload;
+            const order = payload?.order || payload || {};
             this.liveOrderCount++;
             this.updateOrderCounter();
-            this.showNotification(`New order #${order.order_number || order.id} received!`, 'success');
-
-            if (typeof loadPendingOrders === 'function') loadPendingOrders();
-            if (typeof loadRecentOrders === 'function') loadRecentOrders();
-            if (typeof loadOrdersTab === 'function') loadOrdersTab();
-            if (typeof loadOrders === 'function') loadOrders(window.currentPage || 1);
-            if (typeof loadDashboardData === 'function') loadDashboardData();
-        });
-
-        this.socket.on('order_updated', (payload) => {
-            const { order } = payload;
-            this.showNotification(`Order #${order.order_number || order.id} updated to ${order.status}`, 'info');
+            this.showNotification(`New order #${order.order_number || order.orderId || order.id || ''} received! Awaiting your approval.`, 'success');
 
             if (typeof loadPendingOrders === 'function') loadPendingOrders();
             if (typeof loadRecentOrders === 'function') loadRecentOrders();
             if (typeof loadOrdersTab === 'function') loadOrdersTab();
             if (typeof loadOrders === 'function') loadOrders(window.currentPage || 1, true);
+            if (typeof loadStats === 'function') loadStats();
+            if (typeof loadDashboardData === 'function') loadDashboardData();
+        });
+
+        this.socket.on('order_updated', (payload) => {
+            const order = payload?.order || payload || {};
+            const statusLabel = payload?.payment_status === 'completed'
+                ? 'paid (finding driver)'
+                : (order.status || payload?.status || 'updated');
+            this.showNotification(`Order #${order.order_number || order.orderId || order.id || ''} is now ${statusLabel}`, 'info');
+
+            if (typeof loadPendingOrders === 'function') loadPendingOrders();
+            if (typeof loadRecentOrders === 'function') loadRecentOrders();
+            if (typeof loadOrdersTab === 'function') loadOrdersTab();
+            if (typeof loadOrders === 'function') loadOrders(window.currentPage || 1, true);
+            if (typeof loadStats === 'function') loadStats();
             if (typeof loadDashboardData === 'function') loadDashboardData();
         });
 
@@ -261,10 +267,7 @@ function getManagerApiBase() {
 }
 
 function formatCurrency(amount) {
-    return new Intl.NumberFormat('en-IN', {
-        style: 'currency',
-        currency: 'INR'
-    }).format(amount);
+    return `R ${parseFloat(amount || 0).toFixed(2)}`;
 }
 
 function formatDate(dateString) {
@@ -350,7 +353,7 @@ function updateMenuItem(itemId) {
     });
 }
 
-// Pending orders: load and publish helpers
+// Pending orders: load, accept, and reject helpers
 async function loadPendingOrders() {
     try {
         const res = await fetch(`${getManagerApiBase()}/orders/pending`, { credentials: 'same-origin' });
@@ -359,19 +362,21 @@ async function loadPendingOrders() {
         if (!tbody) return;
         tbody.innerHTML = '';
         if (!data.success || !Array.isArray(data.orders) || data.orders.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding:2rem;">No pending orders</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding:2rem;">No pending orders awaiting approval</td></tr>`;
             return;
         }
         for (const o of data.orders) {
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>#${o.order_number || o.id}</td>
+                <td><strong>#${o.order_number || o.id.slice(0, 8)}</strong></td>
                 <td class="truncate">${o.customer_name || '—'}</td>
-                <td>${formatCurrency(o.total_amount || 0)}</td>
+                <td><strong>${formatCurrency(o.total_amount || 0)}</strong></td>
                 <td>${formatDate(o.placed_at || o.created_at)} ${formatTime(o.placed_at || o.created_at)}</td>
                 <td>
-                  <button class="btn btn-primary btn-sm publish-btn" data-order-id="${o.id}">Publish</button>
-                  <button class="btn btn-danger btn-sm ms-2 reject-btn" data-order-id="${o.id}">Reject</button>
+                  <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <button class="btn btn-success btn-sm publish-btn" data-order-id="${o.id}">Accept</button>
+                    <button class="btn btn-danger btn-sm reject-btn" data-order-id="${o.id}">Reject</button>
+                  </div>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -380,7 +385,7 @@ async function loadPendingOrders() {
         document.querySelectorAll('.publish-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const id = btn.dataset.orderId;
-                await publishOrder(id, btn);
+                await acceptOrder(id, btn);
             });
         });
         document.querySelectorAll('.reject-btn').forEach(btn => {
@@ -394,32 +399,52 @@ async function loadPendingOrders() {
     }
 }
 
-async function publishOrder(orderId, btnEl = null) {
+async function acceptOrder(orderId, btnEl = null) {
     try {
         if (btnEl) {
             btnEl.disabled = true;
-            btnEl.textContent = 'Publishing...';
+            btnEl.textContent = 'Accepting...';
         }
-        const res = await fetch(`${getManagerApiBase()}/orders/${orderId}/publish`, {
+        const res = await fetch(`${getManagerApiBase()}/orders/${orderId}/accept`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin'
         });
         const data = await res.json();
         if (data.success) {
-            window.showNotification('Order published to drivers', 'success');
-            const row = btnEl ? btnEl.closest('tr') : document.querySelector(`button[data-order-id='${orderId}']`)?.closest('tr');
-            if (row) row.remove();
+            if (typeof showToast === 'function') {
+                showToast('Order Accepted', 'Customer can now complete payment.', 'success');
+            } else {
+                window.showNotification('Order accepted! Customer can now complete payment.', 'success');
+            }
+            if (typeof closeModal === 'function' && document.getElementById('orderModal')?.classList.contains('active')) {
+                closeModal('orderModal');
+            }
+            if (typeof loadPendingOrders === 'function') loadPendingOrders();
+            if (typeof loadOrders === 'function') loadOrders(window.currentPage || 1, true);
+            if (typeof loadStats === 'function') loadStats();
+            if (typeof loadRecentOrders === 'function') loadRecentOrders();
+            if (typeof loadOrdersTab === 'function') loadOrdersTab();
             if (window.managerDashboard) window.managerDashboard.updateDashboardData();
         } else {
-            window.showNotification(data.error || 'Failed to publish order', 'danger');
-            if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Publish'; }
+            if (typeof showToast === 'function') {
+                showToast('Error', data.error || 'Failed to accept order', 'danger');
+            } else {
+                window.showNotification(data.error || 'Failed to accept order', 'danger');
+            }
+            if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Accept'; }
         }
     } catch (err) {
-        console.error('Publish order error', err);
-        window.showNotification('Error publishing order', 'danger');
-        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Publish'; }
+        console.error('Accept order error', err);
+        window.showNotification('Error accepting order', 'danger');
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Accept'; }
     }
 }
+
+// Keep publishOrder as alias for backward compatibility
+const publishOrder = acceptOrder;
+window.acceptOrder = acceptOrder;
+window.publishOrder = acceptOrder;
 
 async function rejectOrder(orderId, btnEl = null) {
     try {
@@ -428,21 +453,33 @@ async function rejectOrder(orderId, btnEl = null) {
             btnEl.textContent = 'Rejecting...';
         }
 
-        const res = await fetch(`${getManagerApiBase()}/orders/${orderId}/status`, {
-            method: 'PATCH',
+        const res = await fetch(`${getManagerApiBase()}/orders/${orderId}/reject`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'cancelled' })
+            credentials: 'same-origin'
         });
         const data = await res.json();
         if (data.success) {
-            window.showNotification('Order rejected successfully', 'success');
-            const row = btnEl ? btnEl.closest('tr') : document.querySelector(`button[data-order-id='${orderId}']`)?.closest('tr');
-            if (row) row.remove();
+            if (typeof showToast === 'function') {
+                showToast('Order Rejected', 'Order has been cancelled and is no longer available.', 'info');
+            } else {
+                window.showNotification('Order rejected and cancelled.', 'success');
+            }
+            if (typeof closeModal === 'function' && document.getElementById('orderModal')?.classList.contains('active')) {
+                closeModal('orderModal');
+            }
             if (typeof loadPendingOrders === 'function') loadPendingOrders();
+            if (typeof loadOrders === 'function') loadOrders(window.currentPage || 1, true);
+            if (typeof loadStats === 'function') loadStats();
             if (typeof loadOrdersTab === 'function') loadOrdersTab();
             if (typeof loadRecentOrders === 'function') loadRecentOrders();
+            if (window.managerDashboard) window.managerDashboard.updateDashboardData();
         } else {
-            window.showNotification(data.error || 'Failed to reject order', 'danger');
+            if (typeof showToast === 'function') {
+                showToast('Error', data.error || 'Failed to reject order', 'danger');
+            } else {
+                window.showNotification(data.error || 'Failed to reject order', 'danger');
+            }
             if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Reject'; }
         }
     } catch (err) {
@@ -451,6 +488,7 @@ async function rejectOrder(orderId, btnEl = null) {
         if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Reject'; }
     }
 }
+window.rejectOrder = rejectOrder;
 
 // Initialize dashboard when page loads  
 document.addEventListener('DOMContentLoaded', function() {
@@ -464,7 +502,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     if (window.location.pathname.includes('dashboard')) {
-        initializeDashboardCharts();
         loadPendingOrders();
     }
 });

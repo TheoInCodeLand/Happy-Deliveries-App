@@ -8,6 +8,7 @@ interface OrderCardProps {
     id: string;
     order_number: string;
     status: string;
+    payment_status?: string;
     total_amount: number;
     placed_at: string;
     restaurant_name: string;
@@ -19,7 +20,7 @@ interface OrderCardProps {
 }
 
 const OrderCard: React.FC<OrderCardProps> = ({ order, actionLabel, onActionPress }) => {
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = (status: string, paymentStatus?: string) => {
     switch (status) {
       case 'delivered':
         return 'checkmark-circle';
@@ -28,6 +29,8 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, actionLabel, onActionPress
         return 'close-circle';
       case 'pending':
         return 'time';
+      case 'ordering_at_restaurant':
+        return paymentStatus === 'completed' ? 'car' : 'card';
       case 'accepted_by_driver':
         return 'car';
       case 'on_the_way':
@@ -37,7 +40,7 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, actionLabel, onActionPress
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string, paymentStatus?: string) => {
     switch (status) {
       case 'delivered':
         return colors.success;
@@ -45,14 +48,22 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, actionLabel, onActionPress
       case 'no_drivers_available':
         return colors.error;
       case 'pending':
-      case 'accepted_by_driver':
         return colors.warning;
+      case 'ordering_at_restaurant':
+        return paymentStatus === 'completed' ? colors.info : colors.primary;
+      case 'accepted_by_driver':
+        return colors.info;
       default:
         return colors.info;
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: string, paymentStatus?: string) => {
+    if (status === 'pending') return 'Awaiting Approval';
+    if (status === 'ordering_at_restaurant') {
+      return paymentStatus === 'completed' ? 'Paid • Finding Driver' : 'Accepted • Ready to Pay';
+    }
+    if (status === 'cancelled') return 'Rejected / Cancelled';
     return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
@@ -73,14 +84,14 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, actionLabel, onActionPress
           <Text style={styles.date}>{formatDate(order.placed_at)}</Text>
         </View>
         
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + '20' }]}>
+        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status, order.payment_status) + '20' }]}>
           <Ionicons 
-            name={getStatusIcon(order.status)} 
+            name={getStatusIcon(order.status, order.payment_status)} 
             size={14} 
-            color={getStatusColor(order.status)} 
+            color={getStatusColor(order.status, order.payment_status)} 
           />
-          <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
-            {getStatusText(order.status)}
+          <Text style={[styles.statusText, { color: getStatusColor(order.status, order.payment_status) }]}>
+            {getStatusText(order.status, order.payment_status)}
           </Text>
         </View>
       </View>

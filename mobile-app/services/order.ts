@@ -46,4 +46,29 @@ export const orderService = {
   async trackOrder(orderId: string) {
     return api.get(`/orders/${orderId}/tracking`);
   },
+
+  async processPayment(orderId: string, paymentMethod: string, paymentDetails?: any) {
+    return api.post('/payments/process', {
+      order_id: orderId,
+      payment_method: paymentMethod,
+      payment_details: paymentDetails,
+    });
+  },
+
+  async initializePaystackPayment(orderId: string, paymentMethod = 'card') {
+    return api.post('/payments/paystack/initialize', {
+      order_id: orderId,
+      payment_method: paymentMethod,
+    });
+  },
+
+  async verifyPaystackPayment(data: {
+    order_id: string;
+    reference?: string;
+    channel?: string;
+    complete_checkout?: boolean;
+    card_last4?: string;
+  }) {
+    return api.post('/payments/paystack/verify', data);
+  },
 };

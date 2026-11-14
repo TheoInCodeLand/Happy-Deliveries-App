@@ -696,4 +696,23 @@ exports.getPendingOrders = async (req, res) => {
   }
 };
 
+exports.rejectOrder = async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const managerId = req.user.id;
+    const order = await Order.rejectByManager(orderId, managerId);
+    res.json({
+      success: true,
+      message: 'Order rejected and cancelled.',
+      data: order
+    });
+  } catch (error) {
+    console.error('Reject order error:', error);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
 module.exports = exports;

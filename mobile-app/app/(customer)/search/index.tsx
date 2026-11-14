@@ -91,23 +91,29 @@ export default function SearchScreen() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (location) {
-        if (query.length >= 2) {
-          performSearch();
-        } else {
-          // Show nearby restaurants when query is short/empty
-          fetchNearbyRestaurants();
-        }
+      // Use GPS if available, Johannesburg as fallback so the screen is never blank
+      if (query.length >= 2) {
+        performSearch();
+      } else {
+        fetchNearbyRestaurants();
       }
     }, 600);
     return () => clearTimeout(timer);
   }, [query, filters, location]);
 
+  const getEffectiveCoords = () => {
+    let lat = location?.coords.latitude;
+    let lng = location?.coords.longitude;
+    if (lat == null || lng == null || lat > 0 || lng < 10 || lng > 40) {
+      return { lat: -26.2041, lng: 28.0473 };
+    }
+    return { lat, lng };
+  };
+
   const performSearch = async () => {
     setLoading(true);
     try {
-      const lat = location!.coords.latitude;
-      const lng = location!.coords.longitude;
+      const { lat, lng } = getEffectiveCoords();
 
       // Parallel Fetch: restaurants and food matching query
       const [restRes, foodRes] = await Promise.all([
@@ -119,7 +125,14 @@ export default function SearchScreen() {
       ]);
 
       // --- Process Restaurants ---
-      let restData = restRes?.success ? restRes.data : (Array.isArray(restRes) ? restRes : []);
+      let restData = Array.isArray(restRes) ? restRes : ((restRes as any)?.restaurants ?? (restRes as any)?.data ?? []);
+      // Filter by delivery radius
+      restData = restData.filter((r: any) => {
+        if (r.distance_meters != null && r.delivery_radius_km != null) {
+          return Number(r.distance_meters) <= (Number(r.delivery_radius_km) * 1000);
+        }
+        return true;
+      });
       // Filter by Name match if API search was broad
       restData = restData.filter((r: Restaurant) => 
         r.name.toLowerCase().includes(query.toLowerCase()) || 
@@ -127,7 +140,7 @@ export default function SearchScreen() {
       );
 
       // --- Process Food ---
-      let foodData = foodRes?.success ? foodRes.data : [];
+      let foodData = Array.isArray(foodRes) ? foodRes : ((foodRes as any)?.items ?? (foodRes as any)?.data ?? []);
       
       // Apply Client-Side Filters
       if (filters.under100) {
@@ -150,12 +163,18 @@ export default function SearchScreen() {
   const fetchNearbyRestaurants = async () => {
     setLoading(true);
     try {
-      const lat = location!.coords.latitude;
-      const lng = location!.coords.longitude;
+      const { lat, lng } = getEffectiveCoords();
 
       // Use the general search endpoint without query to get nearby restaurants
       const resp = await restaurantService.searchRestaurants(lat, lng, { minRating: filters.rating4Plus ? 4.0 : undefined });
-      const data = resp?.success ? resp.data : (Array.isArray(resp) ? resp : []);
+      let data = Array.isArray(resp) ? resp : ((resp as any)?.restaurants ?? (resp as any)?.data ?? []);
+      // Filter by delivery radius
+      data = data.filter((r: any) => {
+        if (r.distance_meters != null && r.delivery_radius_km != null) {
+          return Number(r.distance_meters) <= (Number(r.delivery_radius_km) * 1000);
+        }
+        return true;
+      });
 
       // Optionally apply client-side cuisine/name filter when query exists (but here query is short)
       setRestaurants(data);

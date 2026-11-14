@@ -7,6 +7,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, router } from 'expo-router';
@@ -14,6 +15,7 @@ import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
 import { useAuth } from '../../hooks/useAuth';
 import { colors } from '../../constants/colors';
+import { API_CONFIG } from '../../constants/api';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -36,10 +38,16 @@ export default function LoginScreen() {
       await login(email, password);
       // Navigation is handled in useAuth hook
     } catch (err: any) {
-      setError(err.message || 'Login failed. Please try again.');
+      const msg = typeof err === 'string' ? err : err?.message || 'Login failed. Please try again.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
+  };
+
+  const openDriverPortal = () => {
+    const baseUrl = API_CONFIG.API_URL.replace(/\/api\/?$/, '');
+    Linking.openURL(`${baseUrl}/driver/register`);
   };
 
   return (
@@ -109,6 +117,13 @@ export default function LoginScreen() {
                 </TouchableOpacity>
               </Link>
             </View>
+
+            <TouchableOpacity style={styles.driverPortalCard} onPress={openDriverPortal}>
+              <Text style={styles.driverPortalTitle}>Want to drive with Happy Delivery?</Text>
+              <Text style={styles.driverPortalSubtitle}>
+                Apply or check your driver application status on the Driver Registration Web Portal →
+              </Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -190,5 +205,25 @@ const styles = StyleSheet.create({
   footerLink: {
     color: colors.primary,
     fontWeight: '600',
+  },
+  driverPortalCard: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    alignItems: 'center',
+  },
+  driverPortalTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#9A3412',
+    marginBottom: 4,
+  },
+  driverPortalSubtitle: {
+    fontSize: 12.5,
+    color: '#C2410C',
+    textAlign: 'center',
   },
 });

@@ -15,6 +15,15 @@ const auth = async (req, res, next) => {
     if (!user) {
       throw new Error();
     }
+
+    if (user.is_active === false) {
+      return res.status(403).json({
+        success: false,
+        error: user.role === 'driver'
+          ? 'Your driver account is pending approval or has not been activated yet.'
+          : 'Your account is currently inactive.'
+      });
+    }
     
     req.user = user;
     req.token = token;

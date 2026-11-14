@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authService } from '../services/auth';
 import { router } from 'expo-router';
@@ -47,13 +48,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Verify token with backend
         try {
           const currentUser = await authService.getCurrentUser();
-          setUser(currentUser.data.user);
-          await AsyncStorage.setItem('user', JSON.stringify(currentUser.data.user));
-        } catch (error) {
-          // Token might be expired
-          await AsyncStorage.removeItem('token');
-          await AsyncStorage.removeItem('user');
-          setUser(null);
+          // API interceptor returns response.data directly.
+          // Backend may return: { user: {...} } or { data: { user: {...} } } or just the user object
+          const freshUser = (currentUser as any)?.user ?? (currentUser as any)?.data?.user ?? currentUser;
+          if (freshUser?.id) {
+            setUser(freshUser);
+            await AsyncStorage.setItem('user', JSON.stringify(freshUser));
+          }
+        } catch (error: any) {
+          // Only clear token on 401 Unauthorized — not on network/server errors
+          // This prevents flashing the auth screen when backend is briefly unreachable
+          const status = error?.response?.status ?? error?.status;
+          if (status === 401) {
+            await AsyncStorage.removeItem('token');
+            await AsyncStorage.removeItem('user');
+            setUser(null);
+          }
+          // Otherwise keep the user we already loaded from AsyncStorage above
         }
       }
     } catch (error) {
@@ -66,13 +77,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const login = async (email: string, password: string) => {
     const response = await authService.login(email, password);
     
-    await AsyncStorage.setItem('token', response.data.token);
-    await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
+    // API interceptor returns response.data directly
+    // Backend returns: { token: "...", user: {...} }
+    const token = (response as any)?.token ?? (response as any)?.data?.token;
+    const user = (response as any)?.user ?? (response as any)?.data?.user;
+
+    if (!token || !user) throw new Error('Invalid login response from server');
+
+    await AsyncStorage.setItem('token', token);
+    await AsyncStorage.setItem('user', JSON.stringify(user));
     
-    setUser(response.data.user);
+    setUser(user);
     
     // Redirect based on role
-    switch (response.data.user.role) {
+    switch (user.role) {
       case 'customer':
         router.replace('/(customer)/home');
         break;
@@ -87,14 +105,32 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const register = async (data: any) => {
     const response = await authService.register(data);
+
+    // If registering a driver account, it requires manager approval before login
+    if ((response as any)?.pending_approval || (response as any)?.data?.pending_approval) {
+      Alert.alert(
+        'Application Pending Approval',
+        (response as any)?.message ||
+          'Your driver application has been submitted for manager review. You will receive an email once your account is approved and ready to sign in.',
+        [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
+      );
+      router.replace('/(auth)/login');
+      return;
+    }
     
-    await AsyncStorage.setItem('token', response.data.token);
-    await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
+    // API interceptor returns response.data directly
+    const token = (response as any)?.token ?? (response as any)?.data?.token;
+    const user = (response as any)?.user ?? (response as any)?.data?.user;
+
+    if (!token || !user) throw new Error('Invalid register response from server');
+
+    await AsyncStorage.setItem('token', token);
+    await AsyncStorage.setItem('user', JSON.stringify(user));
     
-    setUser(response.data.user);
+    setUser(user);
     
     // Redirect based on role
-    switch (response.data.user.role) {
+    switch (user.role) {
       case 'customer':
         router.replace('/(customer)/home');
         break;
