@@ -5,7 +5,7 @@
  * EJS templates need.  Models are NEVER modified here; only the router
  * logic is implemented.
  *
- * Route map
+ * Route map 
  * ─────────
  * GET  /manager/login
  * POST /manager/login
@@ -66,17 +66,17 @@
 'use strict';
 
 const express = require('express');
-const router  = express.Router();
-const db      = require('../src/config/database');
-const bcrypt  = require('bcryptjs');
+const router = express.Router();
+const db = require('../src/config/database');
+const bcrypt = require('bcryptjs');
 
 // ─── Models (lazy-loaded to survive missing optional deps) ──
 const getModel = {
-    User:              () => require('../src/models/User'),
+    User: () => require('../src/models/User'),
     RestaurantManager: () => require('../src/models/RestaurantManager'),
-    Restaurant:        () => require('../src/models/Restaurant'),
-    Menu:              () => require('../src/models/Menu'),
-    Order:             () => require('../src/models/Order'),
+    Restaurant: () => require('../src/models/Restaurant'),
+    Menu: () => require('../src/models/Menu'),
+    Order: () => require('../src/models/Order'),
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -130,7 +130,7 @@ async function fetchRestaurantIds(managerId) {
  * Resolve managerId from a session.  Returns null when no manager record exists.
  */
 async function resolveManager(req) {
-    const RM      = getModel.RestaurantManager();
+    const RM = getModel.RestaurantManager();
     const manager = await RM.findByUserId(req.session.user.id);
     return manager || null;
 }
@@ -139,14 +139,14 @@ async function resolveManager(req) {
 
 async function buildDashboardStats(managerId, restaurants) {
     const empty = {
-        total_revenue:      '0.00',
-        total_orders:       0,
-        avg_rating:         '0.0',
-        active_orders:      0,
-        total_reviews:      0,
-        revenue_change:     0,
-        orders_change:      0,
-        total_restaurants:  0,
+        total_revenue: '0.00',
+        total_orders: 0,
+        avg_rating: '0.0',
+        active_orders: 0,
+        total_reviews: 0,
+        revenue_change: 0,
+        orders_change: 0,
+        total_restaurants: 0,
     };
     if (!restaurants?.length) return empty;
 
@@ -189,32 +189,32 @@ async function buildDashboardStats(managerId, restaurants) {
         `, [ids]),
     ]);
 
-    const totalOrders    = parseInt(tOrders.rows[0].c,  10);
-    const totalRevenue   = parseFloat(tRevenue.rows[0].s);
-    const lwOrdersCount  = parseInt(lwOrders.rows[0].c, 10);
+    const totalOrders = parseInt(tOrders.rows[0].c, 10);
+    const totalRevenue = parseFloat(tRevenue.rows[0].s);
+    const lwOrdersCount = parseInt(lwOrders.rows[0].c, 10);
     const lwRevenueTotal = parseFloat(lwRevenue.rows[0].s);
 
-    const ordersChange  = lwOrdersCount  > 0
-        ? Math.round(((totalOrders  - lwOrdersCount)  / lwOrdersCount)  * 100)
-        : (totalOrders  > 0 ? 100 : 0);
+    const ordersChange = lwOrdersCount > 0
+        ? Math.round(((totalOrders - lwOrdersCount) / lwOrdersCount) * 100)
+        : (totalOrders > 0 ? 100 : 0);
     const revenueChange = lwRevenueTotal > 0
         ? Math.round(((totalRevenue - lwRevenueTotal) / lwRevenueTotal) * 100)
         : (totalRevenue > 0 ? 100 : 0);
 
     const totalReviews = restaurants.reduce((s, r) => s + (parseInt(r.total_ratings, 10) || 0), 0);
-    const avgRating    = (
+    const avgRating = (
         restaurants.reduce((s, r) => s + parseFloat(r.average_rating || 0), 0)
         / restaurants.length
     ).toFixed(1);
 
     return {
-        total_revenue:     totalRevenue.toFixed(2),
-        total_orders:      totalOrders,
-        avg_rating:        avgRating,
-        active_orders:     parseInt(active.rows[0].c, 10),
-        total_reviews:     totalReviews,
-        revenue_change:    revenueChange,
-        orders_change:     ordersChange,
+        total_revenue: totalRevenue.toFixed(2),
+        total_orders: totalOrders,
+        avg_rating: avgRating,
+        active_orders: parseInt(active.rows[0].c, 10),
+        total_reviews: totalReviews,
+        revenue_change: revenueChange,
+        orders_change: ordersChange,
         total_restaurants: restaurants.length,
     };
 }
@@ -306,15 +306,15 @@ router.post('/login', async (req, res) => {
             });
         }
 
-        const RM      = getModel.RestaurantManager();
+        const RM = getModel.RestaurantManager();
         const manager = await RM.findByUserId(user.id);
 
         req.session.user = {
-            id:         user.id,
-            email:      user.email,
-            role:       user.role,
+            id: user.id,
+            email: user.email,
+            role: user.role,
             first_name: user.first_name,
-            last_name:  user.last_name,
+            last_name: user.last_name,
             manager_id: manager?.id ?? null,
         };
 
@@ -322,8 +322,8 @@ router.post('/login', async (req, res) => {
     } catch (err) {
         console.error('[POST /manager/login]', err);
         res.render('manager/login', {
-            title:   'Manager Login',
-            error:   'An unexpected error occurred. Please try again.',
+            title: 'Manager Login',
+            error: 'An unexpected error occurred. Please try again.',
             success: null,
         });
     }
@@ -340,10 +340,10 @@ router.get('/dashboard', isLoggedIn, async (req, res) => {
         const manager = await resolveManager(req);
         if (!manager) { req.session.destroy(); return res.redirect('/manager/login'); }
 
-        const restaurants    = await fetchRestaurants(manager.id);
+        const restaurants = await fetchRestaurants(manager.id);
         const dashboardStats = await buildDashboardStats(manager.id, restaurants);
-        const recentOrders   = await fetchRecentOrders(manager.id, restaurants);
-        const topItems       = await fetchTopItems(manager.id, restaurants);
+        const recentOrders = await fetchRecentOrders(manager.id, restaurants);
+        const topItems = await fetchTopItems(manager.id, restaurants);
 
         res.render('manager/dashboard', {
             title: 'Dashboard', currentPage: 'dashboard',
@@ -446,8 +446,8 @@ router.post('/restaurants/edit/:id', isLoggedIn, async (req, res) => {
 
         // ── Build dynamic UPDATE ──
         const setClause = [];
-        const values  = [];
-        let   idx     = 1;
+        const values = [];
+        let idx = 1;
 
         const add = (col, val) => {
             setClause.push(`${col} = $${idx++}`);
@@ -455,19 +455,19 @@ router.post('/restaurants/edit/:id', isLoggedIn, async (req, res) => {
         };
 
         // Core columns that definitely exist in your DB
-        add('name',                       b.name);
-        add('description',                b.description || null);
-        add('cuisine_type',               b.cuisine_type || null);
-        add('phone_number',               b.phone_number || null);
-        add('email',                      b.email || null);
-        add('address',                    b.address);
-        add('opening_hours',              openingHours);
-        add('preparation_time_minutes',   b.preparation_time_minutes ? parseInt(b.preparation_time_minutes, 10) : 20);
-        add('delivery_radius_km',         b.delivery_radius ? parseFloat(b.delivery_radius) : 5);
-        add('is_active',                  toBool(b.is_active));
-        add('is_accepting_orders',        toBool(b.is_accepting_orders));
-        add('logo_url',                   b.logo_url || null);
-        add('cover_image_url',            b.cover_image_url || null);
+        add('name', b.name);
+        add('description', b.description || null);
+        add('cuisine_type', b.cuisine_type || null);
+        add('phone_number', b.phone_number || null);
+        add('email', b.email || null);
+        add('address', b.address);
+        add('opening_hours', openingHours);
+        add('preparation_time_minutes', b.preparation_time_minutes ? parseInt(b.preparation_time_minutes, 10) : 20);
+        add('delivery_radius_km', b.delivery_radius ? parseFloat(b.delivery_radius) : 5);
+        add('is_active', toBool(b.is_active));
+        add('is_accepting_orders', toBool(b.is_accepting_orders));
+        add('logo_url', b.logo_url || null);
+        add('cover_image_url', b.cover_image_url || null);
 
         // PostGIS location (lat/lng from form)
         if (b.latitude && b.longitude && b.latitude !== '' && b.longitude !== '') {
@@ -596,9 +596,9 @@ router.get('/menus', isLoggedIn, async (req, res) => {
         const manager = await resolveManager(req);
         if (!manager) { req.session.destroy(); return res.redirect('/manager/login'); }
 
-        const restaurants       = await fetchRestaurants(manager.id);
-        let   menus             = [];
-        let   selectedRestaurant = null;
+        const restaurants = await fetchRestaurants(manager.id);
+        let menus = [];
+        let selectedRestaurant = null;
 
         if (restaurants.length) {
             selectedRestaurant = restaurants[0];
@@ -679,10 +679,10 @@ router.get('/settings', isLoggedIn, async (req, res) => {
 
 router.get('/api/dashboard/stats', isLoggedInApi, async (req, res) => {
     try {
-        const manager     = await resolveManager(req);
+        const manager = await resolveManager(req);
         if (!manager) return res.status(403).json({ success: false, error: 'Manager not found' });
         const restaurants = await fetchRestaurants(manager.id);
-        const stats       = await buildDashboardStats(manager.id, restaurants);
+        const stats = await buildDashboardStats(manager.id, restaurants);
         res.json({ success: true, stats });
     } catch (err) {
         console.error('[API dashboard/stats]', err);
@@ -693,7 +693,7 @@ router.get('/api/dashboard/stats', isLoggedInApi, async (req, res) => {
 router.get('/api/dashboard/revenue', isLoggedInApi, async (req, res) => {
     try {
         const { period = 'week' } = req.query;
-        const manager  = await resolveManager(req);
+        const manager = await resolveManager(req);
         const restaurants = await fetchRestaurants(manager.id);
         if (!restaurants.length) return res.json({ success: true, labels: [], data: [] });
 
@@ -712,7 +712,7 @@ router.get('/api/dashboard/revenue', isLoggedInApi, async (req, res) => {
             `, [ids]);
             const map = new Map(rows.map(r => [r.d.toISOString().split('T')[0], parseFloat(r.s)]));
             for (let i = 6; i >= 0; i--) {
-                const d  = new Date(); d.setDate(d.getDate() - i);
+                const d = new Date(); d.setDate(d.getDate() - i);
                 const ds = d.toISOString().split('T')[0];
                 labels.push(d.toLocaleDateString('en-ZA', { weekday: 'short' }));
                 data.push(map.get(ds) || 0);
@@ -729,7 +729,7 @@ router.get('/api/dashboard/revenue', isLoggedInApi, async (req, res) => {
             `, [ids]);
             const map = new Map(rows.map(r => [r.d.toISOString().split('T')[0], parseFloat(r.s)]));
             for (let i = 29; i >= 0; i--) {
-                const d  = new Date(); d.setDate(d.getDate() - i);
+                const d = new Date(); d.setDate(d.getDate() - i);
                 const ds = d.toISOString().split('T')[0];
                 labels.push(`${d.getDate()}/${d.getMonth() + 1}`);
                 data.push(map.get(ds) || 0);
@@ -745,7 +745,7 @@ router.get('/api/dashboard/revenue', isLoggedInApi, async (req, res) => {
                   AND status = 'delivered'
                 GROUP BY DATE_TRUNC('month', placed_at) ORDER BY d
             `, [ids]);
-            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             const map = new Map(rows.map(r => [new Date(r.d).getMonth(), parseFloat(r.s)]));
             for (let i = 0; i < 12; i++) { labels.push(monthNames[i]); data.push(map.get(i) || 0); }
         }
@@ -759,7 +759,7 @@ router.get('/api/dashboard/revenue', isLoggedInApi, async (req, res) => {
 
 router.get('/api/dashboard/orders', isLoggedInApi, async (req, res) => {
     try {
-        const manager     = await resolveManager(req);
+        const manager = await resolveManager(req);
         const restaurants = await fetchRestaurants(manager.id);
         if (!restaurants.length) return res.json({ success: true, labels: [], data: [] });
 
@@ -773,23 +773,23 @@ router.get('/api/dashboard/orders', isLoggedInApi, async (req, res) => {
         `, [ids]);
 
         const statusLabels = {
-            pending:                'Pending',
-            accepted_by_driver:     'Accepted',
+            pending: 'Pending',
+            accepted_by_driver: 'Accepted',
             ordering_at_restaurant: 'Preparing',
-            order_ready:            'Ready',
-            picked_up:              'Picked Up',
-            on_the_way:             'On the Way',
-            arrived:                'Arrived',
-            delivered:              'Delivered',
-            cancelled:              'Cancelled',
+            order_ready: 'Ready',
+            picked_up: 'Picked Up',
+            on_the_way: 'On the Way',
+            arrived: 'Arrived',
+            delivered: 'Delivered',
+            cancelled: 'Cancelled',
         };
         const bgColors = [
-            '#4a6fa5','#17a2b8','#28a745','#20c997',
-            '#ffc107','#fd7e14','#e83e8c','#343a40','#dc3545',
+            '#4a6fa5', '#17a2b8', '#28a745', '#20c997',
+            '#ffc107', '#fd7e14', '#e83e8c', '#343a40', '#dc3545',
         ];
 
         const labels = rows.map(r => statusLabels[r.status] || r.status);
-        const data   = rows.map(r => parseInt(r.c, 10));
+        const data = rows.map(r => parseInt(r.c, 10));
 
         res.json({ success: true, labels, data, backgroundColor: bgColors.slice(0, data.length) });
     } catch (err) {
@@ -800,13 +800,13 @@ router.get('/api/dashboard/orders', isLoggedInApi, async (req, res) => {
 
 router.get('/api/dashboard/recent-orders', isLoggedInApi, async (req, res) => {
     try {
-        const manager     = await resolveManager(req);
+        const manager = await resolveManager(req);
         const restaurants = await fetchRestaurants(manager.id);
         if (!restaurants.length) return res.json({ success: true, orders: [] });
 
-        const ids   = restaurants.map(r => r.id);
+        const ids = restaurants.map(r => r.id);
         const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
-        const date  = req.query.date; // optional YYYY-MM-DD filter
+        const date = req.query.date; // optional YYYY-MM-DD filter
 
         let sql = `
             SELECT
@@ -839,7 +839,7 @@ router.get('/api/dashboard/recent-orders', isLoggedInApi, async (req, res) => {
 
 router.get('/api/dashboard/active-orders-count', isLoggedInApi, async (req, res) => {
     try {
-        const manager     = await resolveManager(req);
+        const manager = await resolveManager(req);
         const restaurants = await fetchRestaurants(manager.id);
         if (!restaurants.length) return res.json({ success: true, count: 0 });
 
@@ -962,19 +962,19 @@ router.post('/api/restaurants', isLoggedInApi, async (req, res) => {
         `, [
             manager.id,
             name,
-            description   || null,
-            cuisineVal    || null,
-            phone_number  || null,
-            email         || null,
+            description || null,
+            cuisineVal || null,
+            phone_number || null,
+            email || null,
             address,
             parseFloat(longitude),
             parseFloat(latitude),
             parseInt(delivery_radius_km, 10) || 5,
-            logo_url      || null,
+            logo_url || null,
             cover_image_url || null,
             hoursJson,
-            parseBool(is_active,            true),
-            parseBool(is_accepting_orders,  true),
+            parseBool(is_active, true),
+            parseBool(is_accepting_orders, true),
             parseInt(preparation_time_minutes, 10) || 20,
         ]);
 
@@ -1005,8 +1005,8 @@ router.put('/api/restaurants/:id', isLoggedInApi, async (req, res) => {
         } = req.body;
 
         const setClause = [];
-        const values    = [];
-        let   idx       = 1;
+        const values = [];
+        let idx = 1;
 
         const add = (col, val) => {
             if (val !== undefined && val !== null && val !== '') {
@@ -1015,16 +1015,16 @@ router.put('/api/restaurants/:id', isLoggedInApi, async (req, res) => {
             }
         };
 
-        add('name',                       name);
-        add('description',                description);
-        add('cuisine_type',               cuisine_type);
-        add('phone_number',               phone_number);
-        add('email',                      email);
-        add('address',                    address);
-        add('delivery_radius_km',         delivery_radius_km != null ? parseInt(delivery_radius_km, 10) : null);
-        add('logo_url',                   logo_url);
-        add('cover_image_url',            cover_image_url);
-        add('preparation_time_minutes',   preparation_time_minutes != null ? parseInt(preparation_time_minutes, 10) : null);
+        add('name', name);
+        add('description', description);
+        add('cuisine_type', cuisine_type);
+        add('phone_number', phone_number);
+        add('email', email);
+        add('address', address);
+        add('delivery_radius_km', delivery_radius_km != null ? parseInt(delivery_radius_km, 10) : null);
+        add('logo_url', logo_url);
+        add('cover_image_url', cover_image_url);
+        add('preparation_time_minutes', preparation_time_minutes != null ? parseInt(preparation_time_minutes, 10) : null);
 
         if (opening_hours) {
             const hoursVal = typeof opening_hours === 'object' ? JSON.stringify(opening_hours) : opening_hours;
@@ -1239,8 +1239,8 @@ router.put('/api/menus/:id', isLoggedInApi, async (req, res) => {
                  updated_at    = CURRENT_TIMESTAMP
              WHERE id = $1 RETURNING *`,
             [req.params.id, name || null, description || null,
-             is_active != null ? parseBool(is_active, true) : null,
-             display_order != null ? parseInt(display_order, 10) : null]
+            is_active != null ? parseBool(is_active, true) : null,
+            display_order != null ? parseInt(display_order, 10) : null]
         );
 
         res.json({ success: true, menu: rows[0] });
@@ -1351,7 +1351,7 @@ router.post('/api/menu-items', isLoggedInApi, async (req, res) => {
                     discounted_price ? parseFloat(discounted_price) : null,
                     category,
                     parseBool(is_available, true),
-                    parseBool(is_veg,       false),
+                    parseBool(is_veg, false),
                     parseInt(calories, 10) || 0,
                     parseInt(preparation_time_minutes, 10) || 15,
                     image_url,
@@ -1386,9 +1386,9 @@ router.put('/api/menu-items/:id', isLoggedInApi, async (req, res) => {
 
         // ----- build safe update from allowed fields -----
         const allowed = [
-            'name','description','price','discounted_price','category',
-            'is_available','is_veg','calories','preparation_time_minutes',
-            'image_url','ingredients','customizations','tags','is_popular',
+            'name', 'description', 'price', 'discounted_price', 'category',
+            'is_available', 'is_veg', 'calories', 'preparation_time_minutes',
+            'image_url', 'ingredients', 'customizations', 'tags', 'is_popular',
         ];
         const updates = {};
         allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
@@ -1403,11 +1403,11 @@ router.put('/api/menu-items/:id', isLoggedInApi, async (req, res) => {
             item = await getModel.Menu().updateMenuItem(req.params.id, updates);
         } catch (modelErr) {
             // ---- fallback: build a manual UPDATE (only if the helper failed) ----
-            const keys   = Object.keys(updates);
-            const vals   = Object.values(updates).map((v, i) => {
+            const keys = Object.keys(updates);
+            const vals = Object.values(updates).map((v, i) => {
                 // Only JSON‑stringify real object (non‑array) fields.
                 // Keep arrays as‑is so the pg driver can turn them into PostgreSQL arrays.
-                if (['ingredients','customizations','tags'].includes(keys[i])) {
+                if (['ingredients', 'customizations', 'tags'].includes(keys[i])) {
                     // Assume these are PostgreSQL array columns.
                     return v;   // JS array [] or [..] → driver handles it
                 }
@@ -1491,16 +1491,16 @@ router.patch('/api/menu-items/:id/toggle-availability', isLoggedInApi, async (re
  */
 router.get('/api/orders', isLoggedInApi, async (req, res) => {
     try {
-        const manager     = await resolveManager(req);
+        const manager = await resolveManager(req);
         if (!manager) return res.status(403).json({ success: false, error: 'Manager not found' });
 
         const restaurants = await fetchRestaurants(manager.id);
         if (!restaurants.length) return res.json({ success: true, orders: [], total: 0, currentPage: 1, totalPages: 0 });
 
-        const allIds     = restaurants.map(r => r.id);
-        const page       = Math.max(parseInt(req.query.page,  10) || 1, 1);
-        const limit      = Math.min(parseInt(req.query.limit, 10) || 15, 100);
-        const offset     = (page - 1) * limit;
+        const allIds = restaurants.map(r => r.id);
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit, 10) || 15, 100);
+        const offset = (page - 1) * limit;
         const { restaurant, status, date } = req.query;
 
         // Determine which restaurant IDs to query
@@ -1510,9 +1510,9 @@ router.get('/api/orders', isLoggedInApi, async (req, res) => {
             ids = [restaurant];
         }
 
-        const params  = [ids];
-        let   where   = 'WHERE o.restaurant_id = ANY($1::uuid[])';
-        let   pIdx    = 2;
+        const params = [ids];
+        let where = 'WHERE o.restaurant_id = ANY($1::uuid[])';
+        let pIdx = 2;
 
         if (status && status !== 'all') {
             where += ` AND o.status = $${pIdx++}`;
@@ -1527,7 +1527,7 @@ router.get('/api/orders', isLoggedInApi, async (req, res) => {
             `SELECT COUNT(*) AS c FROM orders o ${where}`,
             params
         );
-        const total      = parseInt(countRes.rows[0].c, 10);
+        const total = parseInt(countRes.rows[0].c, 10);
         const totalPages = Math.ceil(total / limit);
 
         // Append LIMIT / OFFSET
@@ -1646,7 +1646,7 @@ router.patch('/api/orders/:id/status', isLoggedInApi, async (req, res) => {
 /** GET /api/manager/orders/stats — summary stats for the orders page */
 router.get('/api/orders/stats', isLoggedInApi, async (req, res) => {
     try {
-        const manager     = await resolveManager(req);
+        const manager = await resolveManager(req);
         if (!manager) return res.status(403).json({ success: false, error: 'Manager not found' });
 
         const restaurants = await fetchRestaurants(manager.id);
@@ -1678,9 +1678,9 @@ router.get('/api/orders/stats', isLoggedInApi, async (req, res) => {
         res.json({
             success: true,
             stats: {
-                active:      parseInt(active.rows[0].c,  10),
-                revenue:     parseFloat(revenue.rows[0].s).toFixed(2),
-                total_today: parseInt(total.rows[0].c,   10),
+                active: parseInt(active.rows[0].c, 10),
+                revenue: parseFloat(revenue.rows[0].s).toFixed(2),
+                total_today: parseInt(total.rows[0].c, 10),
             },
         });
     } catch (err) {
@@ -1734,9 +1734,9 @@ router.get('/api/orders/:id', isLoggedInApi, async (req, res) => {
 
 router.get('/api/analytics/overview', isLoggedInApi, async (req, res) => {
     try {
-        const manager     = await resolveManager(req);
+        const manager = await resolveManager(req);
         const restaurants = await fetchRestaurants(manager.id);
-        const stats       = await buildDashboardStats(manager.id, restaurants);
+        const stats = await buildDashboardStats(manager.id, restaurants);
         res.json({ success: true, overview: stats });
     } catch (err) {
         console.error('[API analytics/overview]', err);
@@ -1757,9 +1757,9 @@ router.get('/api/analytics/revenue', isLoggedInApi, async (req, res) => {
 
 router.get('/api/analytics/top-items', isLoggedInApi, async (req, res) => {
     try {
-        const manager     = await resolveManager(req);
+        const manager = await resolveManager(req);
         const restaurants = await fetchRestaurants(manager.id);
-        const period      = req.query.period || '30'; // days
+        const period = req.query.period || '30'; // days
         if (!restaurants.length) return res.json({ success: true, items: [] });
 
         const ids = restaurants.map(r => r.id);
@@ -1801,8 +1801,8 @@ router.put('/api/settings/profile', isLoggedInApi, async (req, res) => {
 
         const updates = {};
         if (first_name?.trim()) updates.first_name = first_name.trim();
-        if (last_name?.trim())  updates.last_name  = last_name.trim();
-        if (email?.trim())      updates.email      = email.trim().toLowerCase();
+        if (last_name?.trim()) updates.last_name = last_name.trim();
+        if (email?.trim()) updates.email = email.trim().toLowerCase();
 
         if (!Object.keys(updates).length) {
             return res.status(400).json({ success: false, error: 'No fields to update' });
@@ -1820,8 +1820,8 @@ router.put('/api/settings/profile', isLoggedInApi, async (req, res) => {
         req.session.user = {
             ...req.session.user,
             first_name: updatedUser.first_name,
-            last_name:  updatedUser.last_name,
-            email:      updatedUser.email,
+            last_name: updatedUser.last_name,
+            email: updatedUser.email,
         };
 
         res.json({ success: true, user: updatedUser });
@@ -1842,13 +1842,13 @@ router.put('/api/settings/password', isLoggedInApi, async (req, res) => {
             return res.status(400).json({ success: false, error: 'New password must be at least 8 characters' });
         }
 
-        const User    = getModel.User();
-        const user    = await User.findById(req.session.user.id);
-        const valid   = await User.verifyPassword(current_password, user.password_hash);
+        const User = getModel.User();
+        const user = await User.findById(req.session.user.id);
+        const valid = await User.verifyPassword(current_password, user.password_hash);
 
         if (!valid) return res.status(401).json({ success: false, error: 'Current password is incorrect' });
 
-        const salt         = await bcrypt.genSalt(10);
+        const salt = await bcrypt.genSalt(10);
         const password_hash = await bcrypt.hash(new_password, salt);
         await User.update(req.session.user.id, { password_hash });
 
@@ -1871,7 +1871,7 @@ router.put('/api/settings/password', isLoggedInApi, async (req, res) => {
 function parseBool(val, def = false) {
     if (val === undefined || val === null || val === '') return def;
     if (typeof val === 'boolean') return val;
-    if (typeof val === 'string')  return val === 'true' || val === '1' || val === 'on';
+    if (typeof val === 'string') return val === 'true' || val === '1' || val === 'on';
     return Boolean(val);
 }
 

@@ -7,6 +7,7 @@ const api = axios.create({
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
   },
 });
 
@@ -40,7 +41,7 @@ api.interceptors.response.use(
       errorMessage = error.message;
     }
 
-    console.error('[API ERROR]:', errorMessage);
+    console.error(`[API ERROR] ${error.config?.method?.toUpperCase()} ${error.config?.baseURL}${error.config?.url}:`, errorMessage);
     return Promise.reject(errorMessage);
   }
 );

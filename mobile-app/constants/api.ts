@@ -1,8 +1,8 @@
 // API Configuration
 export const API_CONFIG = {
-  BASE_URL: process.env.EXPO_PUBLIC_API_URL || 'http://10.220.34.95:5000',
-  API_URL: process.env.EXPO_PUBLIC_API_URL ? `${process.env.EXPO_PUBLIC_API_URL}/api` : 'http://10.220.34.95:5000/api',
-  SOCKET_URL: process.env.EXPO_PUBLIC_SOCKET_URL || 'http://10.220.34.95:5000',
+  BASE_URL: process.env.EXPO_PUBLIC_API_URL || 'https://flight-triumph-dab.ngrok-free.dev',
+  API_URL: process.env.EXPO_PUBLIC_API_URL ? `${process.env.EXPO_PUBLIC_API_URL}/api` : 'https://flight-triumph-dab.ngrok-free.dev/api',
+  SOCKET_URL: process.env.EXPO_PUBLIC_SOCKET_URL || 'https://flight-triumph-dab.ngrok-free.dev',
 
   // Endpoints
   ENDPOINTS: {
