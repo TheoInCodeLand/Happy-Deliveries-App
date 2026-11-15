@@ -16,33 +16,40 @@ class Menu {
     return result.rows[0];
   }
 
-  // Get menus by restaurant with nested items (CRITICAL FIX)
-  static async findByRestaurant(restaurantId) {
+  // Get menus by restaurant with nested items (includes customizations, category, is_popular, etc.)
+  static async findByRestaurant(restaurantId, options = {}) {
+    const onlyActive = options.onlyActive === true;
     const query = `
       SELECT 
-        m.id, m.name, m.description, m.is_active,
+        m.id, m.restaurant_id, m.name, m.description, m.is_active, m.display_order,
         COALESCE(
           json_agg(
             json_build_object(
               'id', mi.id,
+              'menu_id', mi.menu_id,
+              'restaurant_id', mi.restaurant_id,
               'name', mi.name,
               'description', mi.description,
               'price', mi.price,
               'discounted_price', mi.discounted_price,
               'image_url', mi.image_url,
+              'category', COALESCE(mi.category, 'General'),
               'is_available', mi.is_available,
-              'is_veg', mi.is_veg, -- Ensure you ran the SQL command to add this column!
+              'is_veg', COALESCE(mi.is_veg, false),
+              'is_popular', COALESCE(mi.is_popular, false),
               'calories', mi.calories,
               'preparation_time_minutes', mi.preparation_time_minutes,
-              'ingredients', mi.ingredients,
-              'tags', mi.tags
-            ) ORDER BY mi.created_at
+              'ingredients', COALESCE(mi.ingredients, '[]'::jsonb),
+              'customizations', COALESCE(mi.customizations, '[]'::jsonb),
+              'tags', COALESCE(mi.tags, ARRAY[]::text[])
+            ) ORDER BY CASE WHEN mi.is_popular = true THEN 0 ELSE 1 END, mi.created_at
           ) FILTER (WHERE mi.id IS NOT NULL), 
           '[]'
         ) as items
       FROM menus m
       LEFT JOIN menu_items mi ON m.id = mi.menu_id
       WHERE m.restaurant_id = $1
+        ${onlyActive ? 'AND m.is_active = true' : ''}
       GROUP BY m.id
       ORDER BY m.display_order, m.created_at
     `;
@@ -51,31 +58,42 @@ class Menu {
     return result.rows;
   }
 
-  // Create menu item (Added image_url support)
+  // Create menu item (Supports image_url, is_popular, customizations, ingredients, tags)
   static async createMenuItem(menuId, restaurantId, itemData) {
     const {
       name,
       description,
       price,
       discounted_price,
-      category,
+      category = 'General',
       tags = [],
       is_available = true,
       is_veg = false,
+      is_popular = false,
       ingredients = [],
       customizations = [],
       calories = 0,
       preparation_time_minutes = 15,
       image_url
     } = itemData;
+
+    const normalizedIngredients = typeof ingredients === 'string'
+      ? ingredients
+      : JSON.stringify(Array.isArray(ingredients) ? ingredients : []);
+    const normalizedCustomizations = typeof customizations === 'string'
+      ? customizations
+      : JSON.stringify(Array.isArray(customizations) ? customizations : []);
+    const normalizedTags = Array.isArray(tags)
+      ? tags
+      : (typeof tags === 'string' && tags.trim() ? tags.split(',').map(t => t.trim()).filter(Boolean) : []);
     
     const query = `
       INSERT INTO menu_items (
         menu_id, restaurant_id, name, description, price, 
         discounted_price, category, tags, is_available, 
-        is_veg, ingredients, customizations, calories, 
+        is_veg, is_popular, ingredients, customizations, calories, 
         preparation_time_minutes, image_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15, $16)
       RETURNING *
     `;
     
@@ -83,18 +101,19 @@ class Menu {
       menuId,
       restaurantId,
       name,
-      description,
-      price,
-      discounted_price,
-      category,
-      tags,
-      is_available,
-      is_veg,
-      JSON.stringify(ingredients),
-      JSON.stringify(customizations),
-      calories,
-      preparation_time_minutes,
-      image_url
+      description || null,
+      parseFloat(price),
+      discounted_price != null && discounted_price !== '' ? parseFloat(discounted_price) : null,
+      category || 'General',
+      normalizedTags,
+      Boolean(is_available),
+      Boolean(is_veg),
+      Boolean(is_popular),
+      normalizedIngredients,
+      normalizedCustomizations,
+      calories != null && calories !== '' ? parseInt(calories, 10) : null,
+      preparation_time_minutes != null && preparation_time_minutes !== '' ? parseInt(preparation_time_minutes, 10) : 15,
+      image_url || null
     ]);
     
     return result.rows[0];
@@ -151,15 +170,28 @@ class Menu {
     const fields = Object.keys(updateData);
     const values = Object.values(updateData);
     
-    // Ensure JSON fields are stringified for PostgreSQL
-    const jsonFields = ['ingredients', 'customizations', 'tags'];
+    // Ensure JSONB fields are stringified for PostgreSQL, while text[] (tags) remains a JS Array
+    const jsonFields = ['ingredients', 'customizations'];
     fields.forEach((field, index) => {
-      if (jsonFields.includes(field) && typeof values[index] !== 'string') {
-        values[index] = JSON.stringify(values[index]);
+      if (jsonFields.includes(field)) {
+        if (typeof values[index] !== 'string') {
+          values[index] = JSON.stringify(values[index] ?? []);
+        }
+      } else if (field === 'tags') {
+        if (!Array.isArray(values[index])) {
+          values[index] = typeof values[index] === 'string' && values[index].trim()
+            ? values[index].split(',').map(t => t.trim()).filter(Boolean)
+            : [];
+        }
       }
     });
     
-    const setClause = fields.map((field, index) => `${field} = $${index + 2}`).join(', ');
+    const setClause = fields.map((field, index) => {
+      if (jsonFields.includes(field)) {
+        return `${field} = $${index + 2}::jsonb`;
+      }
+      return `${field} = $${index + 2}`;
+    }).join(', ');
     const query = `UPDATE menu_items SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`;
     
     const result = await db.query(query, [itemId, ...values]);
@@ -242,15 +274,28 @@ class Menu {
     const fields = Object.keys(updates);
     const values = Object.values(updates);
 
-    // Ensure JSON fields are stringified for PostgreSQL
-    const jsonFields = ['ingredients', 'customizations', 'tags'];
+    // Ensure JSONB fields are stringified for PostgreSQL, while text[] (tags) remains a JS Array
+    const jsonFields = ['ingredients', 'customizations'];
     fields.forEach((field, index) => {
-      if (jsonFields.includes(field) && typeof values[index] !== 'string') {
-        values[index] = JSON.stringify(values[index]);
+      if (jsonFields.includes(field)) {
+        if (typeof values[index] !== 'string') {
+          values[index] = JSON.stringify(values[index] ?? []);
+        }
+      } else if (field === 'tags') {
+        if (!Array.isArray(values[index])) {
+          values[index] = typeof values[index] === 'string' && values[index].trim()
+            ? values[index].split(',').map(t => t.trim()).filter(Boolean)
+            : [];
+        }
       }
     });
 
-    const setClause = fields.map((field, index) => `${field} = $${index + 2}`).join(', ');
+    const setClause = fields.map((field, index) => {
+      if (jsonFields.includes(field)) {
+        return `${field} = $${index + 2}::jsonb`;
+      }
+      return `${field} = $${index + 2}`;
+    }).join(', ');
     const query = `UPDATE menu_items SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ANY($1) RETURNING *`;
 
     const result = await db.query(query, [itemIds, ...values]);
@@ -377,12 +422,14 @@ class Menu {
   static async getAllDiscoveryItems(limit = 10) {
     const query = `
       SELECT 
-        mi.id, mi.name, mi.price, mi.discounted_price, mi.image_url,
+        mi.id, mi.menu_id, mi.name, mi.description, mi.price, mi.discounted_price, mi.image_url,
+        mi.category, mi.is_veg, mi.is_popular, mi.calories, mi.preparation_time_minutes,
+        mi.ingredients, mi.customizations, mi.tags,
         r.id as restaurant_id, r.name as restaurant_name
       FROM menu_items mi
       JOIN restaurants r ON mi.restaurant_id = r.id
-      WHERE mi.is_available = true 
-      ORDER BY mi.created_at DESC
+      WHERE mi.is_available = true AND r.is_active = true
+      ORDER BY CASE WHEN mi.is_popular = true THEN 0 ELSE 1 END, mi.created_at DESC
       LIMIT $1
     `;
     const result = await db.query(query, [limit]);

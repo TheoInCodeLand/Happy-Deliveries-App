@@ -397,20 +397,62 @@ export default function DriverOrderDetailsScreen() {
         {/* 3. Order Items */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Items</Text>
-          {(order.items || []).map((item, index) => (
-            <View key={item.id || index} style={styles.itemRow}>
-              <View style={styles.qtyBadge}>
-                <Text style={styles.qtyText}>{item.quantity}x</Text>
+          {(order.items || []).map((item, index) => {
+            const rawOpts = item.selected_options;
+            let parsedOpts: Record<string, any> | null = null;
+            if (rawOpts && typeof rawOpts === 'object') {
+              parsedOpts = rawOpts;
+            } else if (typeof rawOpts === 'string' && rawOpts.trim()) {
+              try {
+                parsedOpts = JSON.parse(rawOpts);
+              } catch {
+                parsedOpts = null;
+              }
+            }
+            const optionSummary = parsedOpts
+              ? Object.entries(parsedOpts)
+                  .map(([grp, val]) => {
+                    if (val == null || val === '') return '';
+                    if (Array.isArray(val)) {
+                      const list = val
+                        .map((v) =>
+                          typeof v === 'object' && v !== null
+                            ? v.name || v.label || ''
+                            : String(v)
+                        )
+                        .filter(Boolean)
+                        .join(', ');
+                      return list ? `${grp}: ${list}` : '';
+                    }
+                    if (typeof val === 'object') {
+                      return val.name || val.label ? `${grp}: ${val.name || val.label}` : '';
+                    }
+                    return `${grp}: ${val}`;
+                  })
+                  .filter(Boolean)
+                  .join(' • ')
+              : '';
+
+            return (
+              <View key={item.id || index} style={styles.itemRow}>
+                <View style={styles.qtyBadge}>
+                  <Text style={styles.qtyText}>{item.quantity}x</Text>
+                </View>
+                <View style={styles.itemInfo}>
+                  <Text style={styles.itemName}>{item.name || item.item_name}</Text>
+                  {!!optionSummary && (
+                    <Text style={[styles.itemNote, { fontStyle: 'normal', color: colors.textSecondary }]}>
+                      {optionSummary}
+                    </Text>
+                  )}
+                  {item.special_instructions ? (
+                    <Text style={styles.itemNote}>Note: {item.special_instructions}</Text>
+                  ) : null}
+                </View>
+                <Text style={styles.itemPrice}>R{Number(item.total_price ?? item.unit_price * item.quantity).toFixed(2)}</Text>
               </View>
-              <View style={styles.itemInfo}>
-                <Text style={styles.itemName}>{item.name || item.item_name}</Text>
-                {item.special_instructions ? (
-                  <Text style={styles.itemNote}>Note: {item.special_instructions}</Text>
-                ) : null}
-              </View>
-              <Text style={styles.itemPrice}>R{Number(item.unit_price).toFixed(2)}</Text>
-            </View>
-          ))}
+            );
+          })}
           
           <View style={styles.divider} />
           <View style={styles.totalRow}>

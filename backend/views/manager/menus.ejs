@@ -405,7 +405,7 @@
         }
 
         .modal-lg {
-            max-width: 52rem;
+            max-width: 54rem;
         }
 
         .modal-sm {
@@ -752,10 +752,11 @@
 
         .item-meta {
             display: flex;
-            gap: 1rem;
+            gap: 0.75rem;
             margin-bottom: 0.75rem;
             font-size: 0.8rem;
             color: hsl(var(--muted-foreground));
+            flex-wrap: wrap;
         }
 
         .item-meta span {
@@ -1067,7 +1068,6 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-logo">
-                    <!-- <i class="fas fa-utensils"></i> -->
                 </div>
                 <span class="sidebar-title">Happy Deliveries</span>
             </div>
@@ -1109,12 +1109,6 @@
                             <span>Settings</span>
                         </a>
                     </li>
-                    <!-- <li style="margin-top: auto;">
-                        <a class="sidebar-menu-item" href="/manager/logout" style="color: hsl(var(--destructive));">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
-                            <span>Logout</span>
-                        </a>
-                    </li> -->
                 </ul>
             </nav>
             <div class="sidebar-footer">
@@ -1178,7 +1172,7 @@
                 <div class="page-header">
                     <div>
                         <h2 class="page-title">Menu Management</h2>
-                        <p class="text-muted mt-1" style="font-size: 0.875rem;">Manage menus, categories, and items for your restaurants.</p>
+                        <p class="text-muted mt-1" style="font-size: 0.875rem;">Manage menus, categories, and customizable items for your restaurants.</p>
                     </div>
                     <div class="page-actions">
                         <button class="btn btn-outline btn-sm" onclick="openCategoryModal()">
@@ -1287,7 +1281,7 @@
             <div class="modal-header">
                 <div>
                     <h3 class="modal-title" id="itemModalTitle">Add Menu Item</h3>
-                    <p class="modal-description">Add or edit a menu item.</p>
+                    <p class="modal-description">Add or edit a menu item and its customization options.</p>
                 </div>
                 <button class="modal-close" onclick="closeModal('itemModal')">
                     <i class="fas fa-times"></i>
@@ -1301,23 +1295,23 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">Item Name *</label>
-                            <input type="text" id="itemName" required>
+                            <input type="text" id="itemName" required placeholder="e.g., Double Cheese Burger">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Category *</label>
-                            <input type="text" id="itemCategory" required list="categoryList" placeholder="e.g., Appetizers">
+                            <input type="text" id="itemCategory" required list="categoryList" placeholder="e.g., Burgers, Starters, Drinks">
                             <datalist id="categoryList"></datalist>
                         </div>
                     </div>
 
                     <div class="form-group">
                         <label class="form-label">Description</label>
-                        <textarea id="itemDescription" rows="2"></textarea>
+                        <textarea id="itemDescription" rows="2" placeholder="Describe ingredients, portion size, or preparation style..."></textarea>
                     </div>
 
                     <div class="form-row form-row-3">
                         <div class="form-group">
-                            <label class="form-label">Price *</label>
+                            <label class="form-label">Base Price *</label>
                             <div style="position: relative;">
                                 <span style="position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%); color: hsl(var(--muted-foreground)); font-size: 0.875rem;">R</span>
                                 <input type="number" id="itemPrice" required step="0.01" min="0" style="padding-left: 1.75rem;">
@@ -1350,17 +1344,47 @@
                     <div class="form-group">
                         <label class="form-label">Ingredients</label>
                         <div class="tag-input-container" id="ingredientsContainer">
-                            <input type="text" class="tag-input" id="ingredientsInput" placeholder="Type and press Enter...">
+                            <input type="text" class="tag-input" id="ingredientsInput" placeholder="Type ingredient and press Enter...">
                         </div>
                         <small class="text-muted">Press Enter to add each ingredient</small>
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Tags</label>
+                        <label class="form-label">Dietary &amp; Highlight Tags</label>
                         <div class="tag-input-container" id="tagsContainer">
-                            <input type="text" class="tag-input" id="tagsInput" placeholder="Type and press Enter...">
+                            <input type="text" class="tag-input" id="tagsInput" placeholder="Type tag and press Enter...">
                         </div>
-                        <small class="text-muted">e.g., spicy, gluten-free, bestseller</small>
+                        <small class="text-muted">e.g., spicy, gluten-free, halaal, vegan, bestseller</small>
+                    </div>
+
+                    <!-- Customizations & Option Groups Builder -->
+                    <div class="form-group" style="border: 1px solid hsl(var(--border)); border-radius: var(--radius); padding: 1rem; background: hsl(var(--muted) / 0.35);">
+                        <div class="flex items-center justify-between mb-2" style="flex-wrap: wrap; gap: 0.5rem;">
+                            <div>
+                                <label class="form-label mb-0" style="font-size: 0.95rem; font-weight: 600;">
+                                    <i class="fas fa-sliders-h" style="margin-right: 0.4rem; color: hsl(var(--primary));"></i>
+                                    Customization &amp; Option Groups
+                                </label>
+                                <div class="text-muted" style="font-size: 0.78rem;">
+                                    Configure sizes, preparation styles, required side choices, or paid extras/add-ons.
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-primary" onclick="addCustomizationGroup()">
+                                <i class="fas fa-plus"></i> Add Option Group
+                            </button>
+                        </div>
+
+                        <div class="flex items-center gap-2 mb-3" style="flex-wrap: wrap;">
+                            <span class="text-muted" style="font-size: 0.75rem; font-weight: 500;">Quick Presets:</span>
+                            <button type="button" class="btn btn-sm btn-outline" style="height: 1.75rem; font-size: 0.75rem; padding: 0 0.6rem;" onclick="addPresetGroup('size')">+ Size (Reg/Med/Lrg)</button>
+                            <button type="button" class="btn btn-sm btn-outline" style="height: 1.75rem; font-size: 0.75rem; padding: 0 0.6rem;" onclick="addPresetGroup('spice')">+ Spice Level</button>
+                            <button type="button" class="btn btn-sm btn-outline" style="height: 1.75rem; font-size: 0.75rem; padding: 0 0.6rem;" onclick="addPresetGroup('side')">+ Choice of Side</button>
+                            <button type="button" class="btn btn-sm btn-outline" style="height: 1.75rem; font-size: 0.75rem; padding: 0 0.6rem;" onclick="addPresetGroup('extras')">+ Extra Toppings / Add-ons</button>
+                        </div>
+
+                        <div id="customizationsContainer" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                            <!-- Populated dynamically -->
+                        </div>
                     </div>
 
                     <div class="form-row form-row-3">
@@ -1456,6 +1480,7 @@
         let allCategories = new Set();
         let activeCategory = 'all';
         let deleteCallback = null;
+        let currentCustomizationGroups = [];
 
         // ─── Init ────────────────────────────────────────────────────────────
         document.addEventListener('DOMContentLoaded', async () => {
@@ -1565,6 +1590,14 @@
                             document.getElementById('categoriesCard').style.display = 'none';
                         }
                     });
+
+                    // Auto-select the first restaurant so menus appear right away
+                    if (restaurants.length > 0 && !currentRestaurantId) {
+                        select.value = restaurants[0].id;
+                        currentRestaurantId = restaurants[0].id;
+                        document.getElementById('addMenuBtn').disabled = false;
+                        await loadMenus();
+                    }
                 }
             } catch (err) {
                 console.error(err);
@@ -1587,6 +1620,11 @@
                 if (data.success) {
                     menus = data.menus || [];
                     allCategories = new Set();
+                    menus.forEach(m => {
+                        (m.items || []).forEach(i => {
+                            if (i.category) allCategories.add(i.category);
+                        });
+                    });
                     renderMenus();
                     document.getElementById('categoriesCard').style.display = 'block';
                 }
@@ -1669,8 +1707,10 @@
             }
 
             return filtered.map(item => {
-                allCategories.add(item.category);
-                const hasDiscount = item.discounted_price && item.discounted_price < item.price;
+                if (item.category) allCategories.add(item.category);
+                const hasDiscount = item.discounted_price && Number(item.discounted_price) < Number(item.price);
+                const customGroups = Array.isArray(item.customizations) ? item.customizations : [];
+                const totalOptionChoices = customGroups.reduce((acc, g) => acc + (Array.isArray(g.options) ? g.options.length : 0), 0);
 
                 return `
                 <div class="menu-item-card ${item.is_available ? '' : 'unavailable'}">
@@ -1691,6 +1731,7 @@
                     <div class="item-meta">
                         ${item.calories ? `<span><i class="fas fa-fire-alt"></i> ${item.calories} kcal</span>` : ''}
                         ${item.preparation_time_minutes ? `<span><i class="fas fa-clock"></i> ${item.preparation_time_minutes} min</span>` : ''}
+                        ${customGroups.length ? `<span style="color: hsl(var(--primary)); font-weight: 600;"><i class="fas fa-sliders-h"></i> ${customGroups.length} option group${customGroups.length > 1 ? 's' : ''} (${totalOptionChoices} choices)</span>` : ''}
                     </div>
                     <div class="item-price-row">
                         <div>
@@ -1715,10 +1756,11 @@
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
-                    ${item.ingredients && item.ingredients.length ? `
+                    ${(item.ingredients && item.ingredients.length) || (item.tags && item.tags.length) ? `
                     <div class="nutrition-info">
-                        ${item.ingredients.slice(0, 3).map(ing => `<span class="nutrition-badge">${escapeHtml(ing)}</span>`).join('')}
-                        ${item.ingredients.length > 3 ? `<span class="nutrition-badge">+${item.ingredients.length - 3} more</span>` : ''}
+                        ${(item.ingredients || []).slice(0, 3).map(ing => `<span class="nutrition-badge">${escapeHtml(ing)}</span>`).join('')}
+                        ${(item.ingredients || []).length > 3 ? `<span class="nutrition-badge">+${item.ingredients.length - 3} more</span>` : ''}
+                        ${(item.tags || []).slice(0, 2).map(tag => `<span class="nutrition-badge" style="background: #eff6ff; color: #1d4ed8;">#${escapeHtml(tag)}</span>`).join('')}
                     </div>` : ''}
                 </div>`;
             }).join('');
@@ -1846,6 +1888,274 @@
             }
         }
 
+        // ─── Customization Option Groups Builder ─────────────────────────────
+        function normalizeCustomizationGroup(raw, idx = 0) {
+            const type = raw?.type === 'multiple' || Number(raw?.max_select) > 1 ? 'multiple' : 'single';
+            const options = Array.isArray(raw?.options)
+                ? raw.options.map((opt, optIdx) => {
+                    if (typeof opt === 'string') {
+                        return { id: `opt_${idx}_${optIdx}`, name: opt, price: 0, is_available: true };
+                    }
+                    return {
+                        id: opt?.id || `opt_${idx}_${optIdx}`,
+                        name: String(opt?.name || opt?.label || '').trim(),
+                        price: Number(opt?.price ?? opt?.priceDelta ?? 0) || 0,
+                        is_available: opt?.is_available !== false
+                    };
+                })
+                : [];
+            return {
+                id: raw?.id || `grp_${Date.now()}_${idx}`,
+                name: String(raw?.name || '').trim(),
+                required: Boolean(raw?.required),
+                type,
+                min_select: raw?.required ? Math.max(1, Number(raw?.min_select) || 1) : 0,
+                max_select: type === 'multiple' ? (Number(raw?.max_select) || Math.max(options.length, 3)) : 1,
+                options
+            };
+        }
+
+        function syncCustomizationDomToState() {
+            const container = document.getElementById('customizationsContainer');
+            if (!container) return;
+            const groupCards = container.querySelectorAll('.cust-group-card');
+            if (!groupCards.length) return;
+
+            currentCustomizationGroups = Array.from(groupCards).map((card, gIdx) => {
+                const name = card.querySelector('.cust-group-name')?.value?.trim() || '';
+                const required = Boolean(card.querySelector('.cust-group-required')?.checked);
+                const type = card.querySelector('.cust-group-type')?.value || 'single';
+                const maxSelectVal = parseInt(card.querySelector('.cust-group-max')?.value, 10) || 1;
+                const optionRows = card.querySelectorAll('.cust-option-row');
+                const options = Array.from(optionRows).map((row, oIdx) => ({
+                    id: row.dataset.optId || `opt_${gIdx}_${oIdx}`,
+                    name: row.querySelector('.cust-opt-name')?.value?.trim() || '',
+                    price: parseFloat(row.querySelector('.cust-opt-price')?.value) || 0,
+                    is_available: Boolean(row.querySelector('.cust-opt-avail')?.checked)
+                }));
+                return {
+                    id: card.dataset.groupId || `grp_${gIdx}`,
+                    name,
+                    required,
+                    type,
+                    min_select: required ? 1 : 0,
+                    max_select: type === 'multiple' ? Math.max(1, maxSelectVal) : 1,
+                    options
+                };
+            });
+        }
+
+        function renderCustomizationGroups() {
+            const container = document.getElementById('customizationsContainer');
+            if (!container) return;
+
+            if (!currentCustomizationGroups.length) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 1rem; border: 1px dashed hsl(var(--border)); border-radius: var(--radius); color: hsl(var(--muted-foreground)); font-size: 0.82rem;">
+                        No option groups added yet. Click <strong>Add Option Group</strong> or choose a preset above to make this item customizable.
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = currentCustomizationGroups.map((group, gIdx) => `
+                <div class="cust-group-card" data-group-id="${escapeHtml(group.id)}" style="background: hsl(var(--background)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); padding: 0.875rem;">
+                    <div class="flex items-center justify-between gap-2 mb-2" style="flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 180px;">
+                            <label class="form-label" style="font-size: 0.75rem; margin-bottom: 0.25rem;">Group Title *</label>
+                            <input type="text" class="cust-group-name" value="${escapeHtml(group.name)}" placeholder="e.g., Choose Size, Extra Toppings">
+                        </div>
+                        <div style="width: 165px;">
+                            <label class="form-label" style="font-size: 0.75rem; margin-bottom: 0.25rem;">Selection Mode</label>
+                            <select class="cust-group-type" onchange="onGroupTypeChange(${gIdx}, this.value)">
+                                <option value="single" ${group.type === 'single' ? 'selected' : ''}>Single Choice (1)</option>
+                                <option value="multiple" ${group.type === 'multiple' ? 'selected' : ''}>Multiple Choice</option>
+                            </select>
+                        </div>
+                        <div style="width: 90px; ${group.type === 'multiple' ? '' : 'display:none;'}" class="cust-group-max-wrap">
+                            <label class="form-label" style="font-size: 0.75rem; margin-bottom: 0.25rem;">Max Pick</label>
+                            <input type="number" class="cust-group-max" min="1" max="20" value="${group.max_select || 3}">
+                        </div>
+                        <div class="flex items-center gap-2" style="padding-top: 1.1rem;">
+                            <input type="checkbox" class="toggle-switch cust-group-required" id="custReq_${gIdx}" ${group.required ? 'checked' : ''}>
+                            <label class="toggle-label" for="custReq_${gIdx}" style="font-size: 0.78rem;">Required</label>
+                        </div>
+                        <div style="padding-top: 1.1rem;">
+                            <button type="button" class="btn btn-ghost btn-icon" style="color: hsl(var(--destructive));" onclick="removeCustomizationGroup(${gIdx})" title="Remove Group">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed hsl(var(--border));">
+                        <div class="flex items-center justify-between mb-2">
+                            <span style="font-size: 0.75rem; font-weight: 600; color: hsl(var(--muted-foreground));">OPTIONS &amp; PRICE MODIFIERS</span>
+                            <button type="button" class="btn btn-sm btn-outline" style="height: 1.75rem; font-size: 0.75rem;" onclick="addOptionToGroup(${gIdx})">
+                                <i class="fas fa-plus"></i> Add Choice
+                            </button>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 0.45rem;">
+                            ${(group.options || []).map((opt, oIdx) => `
+                                <div class="cust-option-row flex items-center gap-2" data-opt-id="${escapeHtml(opt.id || `opt_${gIdx}_${oIdx}`)}">
+                                    <input type="text" class="cust-opt-name" style="flex: 1;" value="${escapeHtml(opt.name)}" placeholder="Option name (e.g., Large, Extra Cheese)">
+                                    <div style="position: relative; width: 120px;">
+                                        <span style="position: absolute; left: 0.6rem; top: 50%; transform: translateY(-50%); color: hsl(var(--muted-foreground)); font-size: 0.78rem;">+R</span>
+                                        <input type="number" class="cust-opt-price" step="0.50" min="0" style="padding-left: 1.85rem;" value="${Number(opt.price || 0)}" placeholder="0.00">
+                                    </div>
+                                    <label class="flex items-center gap-1" style="font-size: 0.75rem; white-space: nowrap; cursor: pointer;" title="Option In Stock">
+                                        <input type="checkbox" class="cust-opt-avail" ${opt.is_available !== false ? 'checked' : ''} style="width: auto; height: auto;">
+                                        <span>In Stock</span>
+                                    </label>
+                                    <button type="button" class="btn btn-ghost btn-icon" style="color: hsl(var(--destructive)); width: 1.75rem; height: 1.75rem;" onclick="removeOptionFromGroup(${gIdx}, ${oIdx})" title="Remove choice">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function addCustomizationGroup(initialGroup = null) {
+            syncCustomizationDomToState();
+            const newGroup = initialGroup
+                ? normalizeCustomizationGroup(initialGroup, currentCustomizationGroups.length)
+                : {
+                    id: `grp_${Date.now()}_${currentCustomizationGroups.length}`,
+                    name: '',
+                    required: false,
+                    type: 'single',
+                    min_select: 0,
+                    max_select: 1,
+                    options: [
+                        { id: `opt_${Date.now()}_0`, name: '', price: 0, is_available: true },
+                        { id: `opt_${Date.now()}_1`, name: '', price: 0, is_available: true }
+                    ]
+                };
+            currentCustomizationGroups.push(newGroup);
+            renderCustomizationGroups();
+        }
+
+        function addPresetGroup(presetKey) {
+            const presets = {
+                size: {
+                    name: 'Choose Size',
+                    required: true,
+                    type: 'single',
+                    min_select: 1,
+                    max_select: 1,
+                    options: [
+                        { name: 'Regular', price: 0, is_available: true },
+                        { name: 'Medium', price: 15, is_available: true },
+                        { name: 'Large', price: 25, is_available: true }
+                    ]
+                },
+                spice: {
+                    name: 'Spice / Heat Level',
+                    required: true,
+                    type: 'single',
+                    min_select: 1,
+                    max_select: 1,
+                    options: [
+                        { name: 'Lemon & Herb', price: 0, is_available: true },
+                        { name: 'Mild', price: 0, is_available: true },
+                        { name: 'Hot', price: 0, is_available: true },
+                        { name: 'Extra Hot', price: 0, is_available: true }
+                    ]
+                },
+                side: {
+                    name: 'Choice of Side',
+                    required: true,
+                    type: 'single',
+                    min_select: 1,
+                    max_select: 1,
+                    options: [
+                        { name: 'Regular Chips', price: 0, is_available: true },
+                        { name: 'Spicy Rice', price: 0, is_available: true },
+                        { name: 'Garden Salad', price: 5, is_available: true },
+                        { name: 'Sweet Potato Fries', price: 18, is_available: true }
+                    ]
+                },
+                extras: {
+                    name: 'Extra Toppings & Add-ons',
+                    required: false,
+                    type: 'multiple',
+                    min_select: 0,
+                    max_select: 5,
+                    options: [
+                        { name: 'Extra Cheese', price: 15, is_available: true },
+                        { name: 'Crispy Bacon', price: 22, is_available: true },
+                        { name: 'Fresh Avocado', price: 20, is_available: true },
+                        { name: 'Extra Sauce', price: 10, is_available: true }
+                    ]
+                }
+            };
+            if (presets[presetKey]) {
+                addCustomizationGroup(presets[presetKey]);
+            }
+        }
+
+        function onGroupTypeChange(groupIdx, newType) {
+            syncCustomizationDomToState();
+            if (currentCustomizationGroups[groupIdx]) {
+                currentCustomizationGroups[groupIdx].type = newType;
+                currentCustomizationGroups[groupIdx].max_select = newType === 'multiple'
+                    ? Math.max(2, currentCustomizationGroups[groupIdx].options.length || 3)
+                    : 1;
+                renderCustomizationGroups();
+            }
+        }
+
+        function removeCustomizationGroup(groupIdx) {
+            syncCustomizationDomToState();
+            currentCustomizationGroups.splice(groupIdx, 1);
+            renderCustomizationGroups();
+        }
+
+        function addOptionToGroup(groupIdx) {
+            syncCustomizationDomToState();
+            if (!currentCustomizationGroups[groupIdx]) return;
+            currentCustomizationGroups[groupIdx].options.push({
+                id: `opt_${Date.now()}_${currentCustomizationGroups[groupIdx].options.length}`,
+                name: '',
+                price: 0,
+                is_available: true
+            });
+            renderCustomizationGroups();
+        }
+
+        function removeOptionFromGroup(groupIdx, optIdx) {
+            syncCustomizationDomToState();
+            if (!currentCustomizationGroups[groupIdx]) return;
+            currentCustomizationGroups[groupIdx].options.splice(optIdx, 1);
+            renderCustomizationGroups();
+        }
+
+        function getValidatedCustomizations() {
+            syncCustomizationDomToState();
+            return currentCustomizationGroups
+                .map((grp, gIdx) => {
+                    const validOptions = (grp.options || [])
+                        .filter(o => o.name && o.name.trim().length > 0)
+                        .map((o, oIdx) => ({
+                            id: o.id || `opt_${gIdx}_${oIdx}`,
+                            name: o.name.trim(),
+                            price: Number(o.price) || 0,
+                            is_available: o.is_available !== false
+                        }));
+                    return {
+                        id: grp.id || `grp_${gIdx}`,
+                        name: (grp.name || '').trim(),
+                        required: Boolean(grp.required),
+                        type: grp.type === 'multiple' ? 'multiple' : 'single',
+                        min_select: grp.required ? 1 : 0,
+                        max_select: grp.type === 'multiple' ? Math.max(1, Number(grp.max_select) || validOptions.length || 1) : 1,
+                        options: validOptions
+                    };
+                })
+                .filter(grp => grp.name.length > 0 && grp.options.length > 0);
+        }
+
         // ─── Item CRUD ───────────────────────────────────────────────────────
         function openItemModal(menuId, itemId = null) {
             document.getElementById('itemForm').reset();
@@ -1857,9 +2167,8 @@
             document.getElementById('ingredientsContainer').querySelectorAll('.tag-chip').forEach(c => c.remove());
             document.getElementById('tagsContainer').querySelectorAll('.tag-chip').forEach(c => c.remove());
 
-            if (itemId) {
-                // Editing - populated in editItem()
-            }
+            currentCustomizationGroups = [];
+            renderCustomizationGroups();
 
             openModal('itemModal');
         }
@@ -1886,10 +2195,18 @@
                     document.getElementById('itemIsVeg').checked = item.is_veg === true;
                     document.getElementById('itemIsPopular').checked = item.is_popular === true;
                     document.getElementById('itemModalTitle').textContent = 'Edit Menu Item';
-                    document.getElementById('itemModal').querySelector('.modal-description').textContent = 'Update item details.';
+                    document.getElementById('itemModal').querySelector('.modal-description').textContent = 'Update item details and customization options.';
 
-                    setTags('ingredientsContainer', item.ingredients || []);
-                    setTags('tagsContainer', item.tags || []);
+                    setTags('ingredientsContainer', Array.isArray(item.ingredients) ? item.ingredients : []);
+                    setTags('tagsContainer', Array.isArray(item.tags) ? item.tags : []);
+
+                    const rawCustomizations = Array.isArray(item.customizations)
+                        ? item.customizations
+                        : (typeof item.customizations === 'string' && item.customizations.trim()
+                            ? JSON.parse(item.customizations)
+                            : []);
+                    currentCustomizationGroups = rawCustomizations.map((g, idx) => normalizeCustomizationGroup(g, idx));
+                    renderCustomizationGroups();
 
                     openModal('itemModal');
                 }
@@ -1904,6 +2221,7 @@
         async function saveItem() {
             const itemId = document.getElementById('itemId').value;
             const menuId = document.getElementById('itemMenuId').value;
+            const customizations = getValidatedCustomizations();
 
             const body = {
                 menuId: menuId,
@@ -1920,7 +2238,8 @@
                 is_veg: document.getElementById('itemIsVeg').checked,
                 is_popular: document.getElementById('itemIsPopular').checked,
                 ingredients: getTags('ingredientsContainer'),
-                tags: getTags('tagsContainer')
+                tags: getTags('tagsContainer'),
+                customizations: customizations
             };
 
             if (!body.name || !body.category || isNaN(body.price)) {
@@ -2079,7 +2398,7 @@
         function addTagChip(container, text) {
             const chip = document.createElement('div');
             chip.className = 'tag-chip';
-            chip.innerHTML = `${escapeHtml(text)} <button onclick="this.parentElement.remove()">&times;</button>`;
+            chip.innerHTML = `${escapeHtml(text)} <button type="button" onclick="this.parentElement.remove()">&times;</button>`;
             container.insertBefore(chip, container.querySelector('.tag-input'));
         }
 

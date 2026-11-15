@@ -467,21 +467,66 @@ export default function OrderDetailsScreen() {
         {/* Order Items */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Items</Text>
-          {(order.items || []).map(item => (
-            <View key={item.id} style={styles.orderItem}>
-              <View style={styles.itemHeader}>
-                <Text style={styles.itemName}>{item.item_name}</Text>
-                {/* FIX: Ensure number conversion */}
-                <Text style={styles.itemPrice}>R {Number(item.total_price || 0).toFixed(2)}</Text>
+          {(order.items || []).map(item => {
+            const rawOpts = (item as any).selected_options;
+            let parsedOpts: Record<string, any> | null = null;
+            if (rawOpts && typeof rawOpts === 'object') {
+              parsedOpts = rawOpts;
+            } else if (typeof rawOpts === 'string' && rawOpts.trim()) {
+              try {
+                parsedOpts = JSON.parse(rawOpts);
+              } catch {
+                parsedOpts = null;
+              }
+            }
+            const optionSummary = parsedOpts
+              ? Object.entries(parsedOpts)
+                  .map(([grp, val]) => {
+                    if (val == null || val === '') return '';
+                    if (Array.isArray(val)) {
+                      const list = val
+                        .map((v) => {
+                          if (typeof v === 'object' && v !== null) {
+                            const p = Number(v.price ?? v.priceDelta ?? 0);
+                            return `${v.name || v.label || ''}${p > 0 ? ` (+R${p.toFixed(2)})` : ''}`;
+                          }
+                          return String(v);
+                        })
+                        .filter(Boolean)
+                        .join(', ');
+                      return list ? `${grp}: ${list}` : '';
+                    }
+                    if (typeof val === 'object') {
+                      const p = Number(val.price ?? val.priceDelta ?? 0);
+                      const n = val.name || val.label || '';
+                      return n ? `${grp}: ${n}${p > 0 ? ` (+R${p.toFixed(2)})` : ''}` : '';
+                    }
+                    return `${grp}: ${val}`;
+                  })
+                  .filter(Boolean)
+                  .join(' • ')
+              : '';
+
+            return (
+              <View key={item.id} style={styles.orderItem}>
+                <View style={styles.itemHeader}>
+                  <Text style={styles.itemName}>{item.item_name}</Text>
+                  <Text style={styles.itemPrice}>R {Number(item.total_price || 0).toFixed(2)}</Text>
+                </View>
+                <View style={styles.itemDetails}>
+                  <Text style={styles.itemQuantity}>Qty: {item.quantity}</Text>
+                  {!!optionSummary && (
+                    <Text style={[styles.itemInstructions, { fontStyle: 'normal', color: colors.textSecondary, marginTop: 2 }]}>
+                      {optionSummary}
+                    </Text>
+                  )}
+                  {!!item.special_instructions && (
+                    <Text style={styles.itemInstructions}>Note: {item.special_instructions}</Text>
+                  )}
+                </View>
               </View>
-              <View style={styles.itemDetails}>
-                <Text style={styles.itemQuantity}>Qty: {item.quantity}</Text>
-                {item.special_instructions && (
-                  <Text style={styles.itemInstructions}>Note: {item.special_instructions}</Text>
-                )}
-              </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
         {/* Delivery Details */}

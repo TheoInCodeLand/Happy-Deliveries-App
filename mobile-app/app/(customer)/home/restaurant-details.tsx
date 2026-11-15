@@ -45,6 +45,10 @@ type MenuItemType = {
   ingredients: any[];
   customizations: any[];
   is_available: boolean;
+  is_veg?: boolean;
+  is_popular?: boolean;
+  calories?: number;
+  preparation_time_minutes?: number;
 };
 
 export default function RestaurantDetailsScreen() {
@@ -101,11 +105,15 @@ export default function RestaurantDetailsScreen() {
                 price: Number(item.price),
                 discounted_price: item.discounted_price ? Number(item.discounted_price) : undefined,
                 image_url: item.image_url,
-                category: menu.name,
+                category: item.category || menu.name || 'General',
                 tags: item.tags || [],
                 ingredients: item.ingredients || [],
                 customizations: item.customizations || [],
                 is_available: item.is_available ?? true,
+                is_veg: Boolean(item.is_veg),
+                is_popular: Boolean(item.is_popular),
+                calories: item.calories ? Number(item.calories) : undefined,
+                preparation_time_minutes: item.preparation_time_minutes ? Number(item.preparation_time_minutes) : undefined,
               });
             });
           }
@@ -178,7 +186,7 @@ export default function RestaurantDetailsScreen() {
       menuItemId: item.id,
       name: item.name,
       description: item.description,
-      price: item.discounted_price || item.price,
+      price: Number(item.unitPrice ?? item.discounted_price ?? item.price),
       quantity: item.quantity || 1,
       specialInstructions: item.specialInstructions,
       selectedOptions: item.selectedOptions,

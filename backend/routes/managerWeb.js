@@ -1170,25 +1170,32 @@ router.get('/api/menus', isLoggedInApi, async (req, res) => {
 
         let menus;
         try {
-            menus = await getModel.Menu().findByRestaurant(restaurantId);
+            menus = await getModel.Menu().findByRestaurant(restaurantId, { onlyActive: false });
         } catch (e) {
             // Raw SQL fallback
             const { rows } = await db.query(
-                `SELECT m.id, m.name, m.description, m.is_active, m.display_order,
+                `SELECT m.id, m.restaurant_id, m.name, m.description, m.is_active, m.display_order,
                         COALESCE(
                           json_agg(
                             json_build_object(
-                              'id',                     mi.id,
-                              'name',                   mi.name,
-                              'description',            mi.description,
-                              'price',                  mi.price,
-                              'discounted_price',       mi.discounted_price,
-                              'image_url',              mi.image_url,
-                              'is_available',           mi.is_available,
-                              'category',               mi.category,
-                              'calories',               mi.calories,
-                              'preparation_time_minutes', mi.preparation_time_minutes
-                            ) ORDER BY mi.created_at
+                              'id',                       mi.id,
+                              'menu_id',                  mi.menu_id,
+                              'restaurant_id',            mi.restaurant_id,
+                              'name',                     mi.name,
+                              'description',              mi.description,
+                              'price',                    mi.price,
+                              'discounted_price',         mi.discounted_price,
+                              'image_url',                mi.image_url,
+                              'is_available',             mi.is_available,
+                              'is_veg',                   COALESCE(mi.is_veg, false),
+                              'is_popular',               COALESCE(mi.is_popular, false),
+                              'category',                 COALESCE(mi.category, 'General'),
+                              'calories',                 mi.calories,
+                              'preparation_time_minutes', mi.preparation_time_minutes,
+                              'ingredients',              COALESCE(mi.ingredients, '[]'::jsonb),
+                              'customizations',           COALESCE(mi.customizations, '[]'::jsonb),
+                              'tags',                     COALESCE(mi.tags, ARRAY[]::text[])
+                            ) ORDER BY CASE WHEN mi.is_popular = true THEN 0 ELSE 1 END, mi.created_at
                           ) FILTER (WHERE mi.id IS NOT NULL), '[]'
                         ) AS items
                  FROM menus m
@@ -1360,7 +1367,7 @@ router.post('/api/menu-items', isLoggedInApi, async (req, res) => {
         } catch (e) {
             const {
                 description, discounted_price, category = 'General',
-                is_available = true, is_veg = false,
+                is_available = true, is_veg = false, is_popular = false,
                 calories = 0, preparation_time_minutes = 15,
                 image_url = null, ingredients = [], customizations = [], tags = [],
             } = req.body;
@@ -1368,9 +1375,9 @@ router.post('/api/menu-items', isLoggedInApi, async (req, res) => {
             const { rows } = await db.query(`
                 INSERT INTO menu_items (
                     menu_id, restaurant_id, name, description, price, discounted_price,
-                    category, is_available, is_veg, calories, preparation_time_minutes,
+                    category, is_available, is_veg, is_popular, calories, preparation_time_minutes,
                     image_url, ingredients, customizations, tags
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16)
                 RETURNING *`,
                 [
                     menuId, restaurantId, name,
@@ -1380,6 +1387,7 @@ router.post('/api/menu-items', isLoggedInApi, async (req, res) => {
                     category,
                     parseBool(is_available, true),
                     parseBool(is_veg, false),
+                    parseBool(is_popular, false),
                     parseInt(calories, 10) || 0,
                     parseInt(preparation_time_minutes, 10) || 15,
                     image_url,
@@ -1431,22 +1439,22 @@ router.put('/api/menu-items/:id', isLoggedInApi, async (req, res) => {
             item = await getModel.Menu().updateMenuItem(req.params.id, updates);
         } catch (modelErr) {
             // ---- fallback: build a manual UPDATE (only if the helper failed) ----
+            const jsonbCols = ['ingredients', 'customizations'];
             const keys = Object.keys(updates);
             const vals = Object.values(updates).map((v, i) => {
-                // Only JSON‑stringify real object (non‑array) fields.
-                // Keep arrays as‑is so the pg driver can turn them into PostgreSQL arrays.
-                if (['ingredients', 'customizations', 'tags'].includes(keys[i])) {
-                    // Assume these are PostgreSQL array columns.
-                    return v;   // JS array [] or [..] → driver handles it
+                if (jsonbCols.includes(keys[i])) {
+                    return typeof v === 'string' ? v : JSON.stringify(v ?? []);
                 }
-                // For any other field that might be an object (e.g. JSONB column)
+                if (keys[i] === 'tags') {
+                    return Array.isArray(v) ? v : [];
+                }
                 if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
                     return JSON.stringify(v);
                 }
-                return v; // string, number, boolean, null, etc.
+                return v;
             });
 
-            const setCl = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
+            const setCl = keys.map((k, i) => (jsonbCols.includes(k) ? `${k} = $${i + 2}::jsonb` : `${k} = $${i + 2}`)).join(', ');
             const { rows } = await db.query(
                 `UPDATE menu_items SET ${setCl}, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`,
                 [req.params.id, ...vals]
@@ -1784,7 +1792,7 @@ router.get('/api/orders/:id', isLoggedInApi, async (req, res) => {
         const { rows: items } = await db.query(`
             SELECT
                 oi.id, oi.quantity, oi.unit_price, oi.total_price,
-                oi.special_instructions,
+                oi.special_instructions, oi.selected_options, oi.allergen_notes,
                 mi.name AS item_name, mi.image_url
             FROM order_items oi
             JOIN menu_items  mi ON oi.menu_item_id = mi.id

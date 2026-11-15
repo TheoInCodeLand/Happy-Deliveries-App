@@ -38,10 +38,32 @@ const CartItem: React.FC<CartItemProps> = ({ item, onRemove, onQuantityChange })
   };
 
   const getOptionsText = () => {
-    if (!item.selectedOptions) return '';
+    if (!item.selectedOptions || typeof item.selectedOptions !== 'object') return '';
     return Object.entries(item.selectedOptions)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(', ');
+      .map(([key, value]) => {
+        if (value == null || value === '') return '';
+        if (Array.isArray(value)) {
+          const listStr = value
+            .map((v) => {
+              if (typeof v === 'object' && v !== null) {
+                const p = Number(v.price ?? v.priceDelta ?? 0);
+                return `${v.name || v.label || ''}${p > 0 ? ` (+R${p.toFixed(2)})` : ''}`;
+              }
+              return String(v);
+            })
+            .filter(Boolean)
+            .join(', ');
+          return listStr ? `${key}: ${listStr}` : '';
+        }
+        if (typeof value === 'object') {
+          const p = Number(value.price ?? value.priceDelta ?? 0);
+          const name = value.name || value.label || '';
+          return name ? `${key}: ${name}${p > 0 ? ` (+R${p.toFixed(2)})` : ''}` : '';
+        }
+        return `${key}: ${value}`;
+      })
+      .filter(Boolean)
+      .join(' • ');
   };
 
   return (
@@ -67,7 +89,7 @@ const CartItem: React.FC<CartItemProps> = ({ item, onRemove, onQuantityChange })
         </View>
         
         {getOptionsText() ? (
-          <Text style={styles.options} numberOfLines={1}>
+          <Text style={styles.options} numberOfLines={3}>
             {getOptionsText()}
           </Text>
         ) : null}

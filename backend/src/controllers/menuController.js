@@ -1,4 +1,7 @@
 const Menu = require('../models/Menu');
+const Restaurant = require('../models/Restaurant');
+const RestaurantManager = require('../models/RestaurantManager');
+const db = require('../config/database');
 
 exports.getPopularItems = async (req, res) => {
   try {
@@ -137,6 +140,7 @@ exports.updateMenuItem = async (req, res) => {
       image_url,
       is_available,
       is_veg,
+      is_popular,
       ingredients,
       tags,
       customizations,
@@ -155,9 +159,28 @@ exports.updateMenuItem = async (req, res) => {
     if (image_url !== undefined) updateData.image_url = image_url;
     if (is_available !== undefined) updateData.is_available = is_available === 'true' || is_available === true;
     if (is_veg !== undefined) updateData.is_veg = is_veg === 'true' || is_veg === true;
-    if (ingredients !== undefined) updateData.ingredients = Array.isArray(ingredients) ? ingredients : (ingredients ? ingredients.split(',').map(i => i.trim()) : []);
-    if (tags !== undefined) updateData.tags = Array.isArray(tags) ? tags : (tags ? tags.split(',').map(t => t.trim()) : []);
-    if (customizations !== undefined) updateData.customizations = Array.isArray(customizations) ? customizations : [];
+    if (is_popular !== undefined) updateData.is_popular = is_popular === 'true' || is_popular === true;
+    if (ingredients !== undefined) {
+      updateData.ingredients = Array.isArray(ingredients)
+        ? ingredients
+        : (typeof ingredients === 'string' && ingredients.trim().startsWith('[')
+            ? JSON.parse(ingredients)
+            : (ingredients ? String(ingredients).split(',').map(i => i.trim()).filter(Boolean) : []));
+    }
+    if (tags !== undefined) {
+      updateData.tags = Array.isArray(tags)
+        ? tags
+        : (typeof tags === 'string' && tags.trim().startsWith('[')
+            ? JSON.parse(tags)
+            : (tags ? String(tags).split(',').map(t => t.trim()).filter(Boolean) : []));
+    }
+    if (customizations !== undefined) {
+      updateData.customizations = Array.isArray(customizations)
+        ? customizations
+        : (typeof customizations === 'string' && customizations.trim()
+            ? JSON.parse(customizations)
+            : []);
+    }
     if (calories !== undefined) updateData.calories = parseInt(calories) || 0;
     if (preparation_time_minutes !== undefined) updateData.preparation_time_minutes = parseInt(preparation_time_minutes) || 15;
 
@@ -344,6 +367,7 @@ exports.createMenuItem = async (req, res) => {
       image_url,
       is_available,
       is_veg,
+      is_popular,
       ingredients,
       tags,
       customizations,
@@ -351,16 +375,29 @@ exports.createMenuItem = async (req, res) => {
       preparation_time_minutes
     } = form;
 
-    // Convert string values to appropriate types
-    const parsedMenuId = parseInt(menuId);
-    const parsedRestaurantId = parseInt(restaurantId);
+    // Preserve UUID string IDs
+    const parsedMenuId = String(menuId).trim();
+    const parsedRestaurantId = String(restaurantId).trim();
     const parsedPrice = parseFloat(price);
     const parsedDiscountedPrice = discounted_price ? parseFloat(discounted_price) : null;
-    const parsedIsAvailable = is_available === 'true' || is_available === true;
+    const parsedIsAvailable = is_available === 'true' || is_available === true || is_available === undefined;
     const parsedIsVeg = is_veg === 'true' || is_veg === true;
-    const parsedIngredients = Array.isArray(ingredients) ? ingredients : (ingredients ? ingredients.split(',').map(i => i.trim()) : []);
-    const parsedTags = Array.isArray(tags) ? tags : (tags ? tags.split(',').map(t => t.trim()) : []);
-    const parsedCustomizations = Array.isArray(customizations) ? customizations : [];
+    const parsedIsPopular = is_popular === 'true' || is_popular === true;
+    const parsedIngredients = Array.isArray(ingredients)
+      ? ingredients
+      : (typeof ingredients === 'string' && ingredients.trim().startsWith('[')
+          ? JSON.parse(ingredients)
+          : (ingredients ? String(ingredients).split(',').map(i => i.trim()).filter(Boolean) : []));
+    const parsedTags = Array.isArray(tags)
+      ? tags
+      : (typeof tags === 'string' && tags.trim().startsWith('[')
+          ? JSON.parse(tags)
+          : (tags ? String(tags).split(',').map(t => t.trim()).filter(Boolean) : []));
+    const parsedCustomizations = Array.isArray(customizations)
+      ? customizations
+      : (typeof customizations === 'string' && customizations.trim()
+          ? JSON.parse(customizations)
+          : []);
     const parsedCalories = parseInt(calories) || 0;
     const parsedPreparationTimeMinutes = parseInt(preparation_time_minutes) || 15;
 
@@ -398,6 +435,7 @@ exports.createMenuItem = async (req, res) => {
       image_url,
       is_available: parsedIsAvailable,
       is_veg: parsedIsVeg,
+      is_popular: parsedIsPopular,
       ingredients: parsedIngredients,
       tags: parsedTags,
       customizations: parsedCustomizations,

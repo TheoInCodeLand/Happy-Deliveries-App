@@ -1,14 +1,14 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Image,
-  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   Alert,
   Animated,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -16,6 +16,11 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
 import Button from '../../../components/common/Button';
+import {
+  normalizeCustomizations,
+  NormalizedCustomizationGroup,
+  NormalizedOptionChoice,
+} from '../../../components/customer/MenuItem';
 import { colors } from '../../../constants/colors';
 import { restaurantService } from '../../../services/restaurant';
 import { useCartStore } from '../../../store/cartStore';
@@ -32,6 +37,10 @@ type MenuItemType = {
   ingredients: any[];
   customizations: any[];
   is_available: boolean;
+  is_veg?: boolean;
+  is_popular?: boolean;
+  calories?: number;
+  preparation_time_minutes?: number;
 };
 
 type Restaurant = {
@@ -52,7 +61,9 @@ export default function MenuItemDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
   const [specialInstructions, setSpecialInstructions] = useState('');
-  const [selectedCustomizations, setSelectedCustomizations] = useState<Record<string, string>>({});
+  const [selectedCustomizations, setSelectedCustomizations] = useState<
+    Record<string, NormalizedOptionChoice[]>
+  >({});
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -92,10 +103,16 @@ export default function MenuItemDetailScreen() {
         discounted_price: data.discounted_price ? Number(data.discounted_price) : undefined,
         image_url: data.image_url,
         category: data.category || '',
-        tags: data.tags || [],
-        ingredients: data.ingredients || [],
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        ingredients: Array.isArray(data.ingredients) ? data.ingredients : [],
         customizations: data.customizations || [],
         is_available: data.is_available ?? true,
+        is_veg: Boolean(data.is_veg),
+        is_popular: Boolean(data.is_popular),
+        calories: data.calories ? Number(data.calories) : undefined,
+        preparation_time_minutes: data.preparation_time_minutes
+          ? Number(data.preparation_time_minutes)
+          : undefined,
       });
     } catch (error) {
       console.error('Error fetching menu item details:', error);
@@ -114,9 +131,92 @@ export default function MenuItemDetailScreen() {
     }
   };
 
+  const customizationGroups = useMemo(
+    () => normalizeCustomizations(menuItem?.customizations),
+    [menuItem?.customizations]
+  );
+
+  const basePrice = useMemo(() => {
+    if (!menuItem) return 0;
+    return menuItem.discounted_price && menuItem.discounted_price < menuItem.price
+      ? menuItem.discounted_price
+      : menuItem.price;
+  }, [menuItem]);
+
+  const extraOptionsPrice = useMemo(() => {
+    let sum = 0;
+    Object.values(selectedCustomizations).forEach((choices) => {
+      if (Array.isArray(choices)) {
+        choices.forEach((c) => {
+          sum += Number(c.price || 0);
+        });
+      }
+    });
+    return sum;
+  }, [selectedCustomizations]);
+
+  const unitPrice = basePrice + extraOptionsPrice;
+
+  const handleToggleOption = (
+    group: NormalizedCustomizationGroup,
+    choice: NormalizedOptionChoice
+  ) => {
+    setSelectedCustomizations((prev) => {
+      const current = prev[group.name] || [];
+      const exists = current.some((c) => c.name === choice.name);
+
+      if (group.type === 'single') {
+        if (exists && !group.required) {
+          const next = { ...prev };
+          delete next[group.name];
+          return next;
+        }
+        return {
+          ...prev,
+          [group.name]: [choice],
+        };
+      } else {
+        if (exists) {
+          const filtered = current.filter((c) => c.name !== choice.name);
+          const next = { ...prev };
+          if (filtered.length > 0) {
+            next[group.name] = filtered;
+          } else {
+            delete next[group.name];
+          }
+          return next;
+        } else {
+          if (current.length >= group.max_select) {
+            Alert.alert(
+              'Maximum Reached',
+              `You can select up to ${group.max_select} option${group.max_select > 1 ? 's' : ''} for "${group.name}".`
+            );
+            return prev;
+          }
+          return {
+            ...prev,
+            [group.name]: [...current, choice],
+          };
+        }
+      }
+    });
+  };
+
   // --- Cart Handling ---
   const handleAddToCart = () => {
     if (!menuItem || !restaurant) return;
+
+    // Validate required option groups
+    for (const group of customizationGroups) {
+      const picked = selectedCustomizations[group.name] || [];
+      if (group.required && picked.length === 0) {
+        Alert.alert(
+          'Required Selection',
+          `Please choose an option for "${group.name}".`
+        );
+        return;
+      }
+    }
 
     // Check if user is ordering from a different restaurant
     if (cartRestaurantId && cartRestaurantId !== restaurantId) {
@@ -144,7 +244,6 @@ export default function MenuItemDetailScreen() {
   const addItemToCart = () => {
     if (!menuItem || !restaurant) return;
 
-    const finalPrice = menuItem.discounted_price || menuItem.price;
     setCartRestaurant(restaurantId, restaurant.name);
     addItem({
       restaurantId,
@@ -152,10 +251,10 @@ export default function MenuItemDetailScreen() {
       menuItemId: menuItem.id,
       name: menuItem.name,
       description: menuItem.description,
-      price: finalPrice,
+      price: unitPrice,
       quantity,
       imageUrl: menuItem.image_url,
-      specialInstructions,
+      specialInstructions: specialInstructions.trim(),
       selectedOptions: selectedCustomizations,
     });
 
@@ -173,8 +272,8 @@ export default function MenuItemDetailScreen() {
   };
 
   // --- Render Helpers ---
-  const handleIncrement = () => setQuantity(prev => prev + 1);
-  const handleDecrement = () => setQuantity(prev => (prev > 1 ? prev - 1 : 1));
+  const handleIncrement = () => setQuantity((prev) => prev + 1);
+  const handleDecrement = () => setQuantity((prev) => (prev > 1 ? prev - 1 : 1));
 
   const headerOpacity = scrollY.interpolate({
     inputRange: [0, 100],
@@ -221,8 +320,6 @@ export default function MenuItemDetailScreen() {
         )
       : 0;
 
-  const finalPrice = menuItem.discounted_price || menuItem.price;
-
   // Normalize restaurant rating to a number to avoid runtime errors
   const ratingValue =
     restaurant && restaurant.average_rating != null
@@ -248,6 +345,7 @@ export default function MenuItemDetailScreen() {
       <Animated.ScrollView
         style={styles.scrollView}
         scrollEventThrottle={16}
+        keyboardShouldPersistTaps="handled"
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
           { useNativeDriver: false }
@@ -272,7 +370,9 @@ export default function MenuItemDetailScreen() {
 
           <Image
             source={{
-              uri: menuItem.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&q=80&auto=format&fit=crop',
+              uri:
+                menuItem.image_url ||
+                'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&q=80&auto=format&fit=crop',
             }}
             style={styles.image}
           />
@@ -295,15 +395,44 @@ export default function MenuItemDetailScreen() {
         <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
           {/* Header Info */}
           <View style={styles.headerInfo}>
+            <View style={styles.metaBadgesRow}>
+              {menuItem.is_veg && (
+                <View style={styles.vegPill}>
+                  <Ionicons name="leaf" size={12} color="#166534" />
+                  <Text style={styles.vegPillText}>Vegetarian</Text>
+                </View>
+              )}
+              {menuItem.is_popular && (
+                <View style={styles.popularPill}>
+                  <Ionicons name="flame" size={12} color="#9a3412" />
+                  <Text style={styles.popularPillText}>Popular</Text>
+                </View>
+              )}
+              {!!menuItem.preparation_time_minutes && (
+                <View style={styles.metaInfoPill}>
+                  <Ionicons name="time-outline" size={13} color="#475569" />
+                  <Text style={styles.metaInfoPillText}>
+                    {menuItem.preparation_time_minutes} min
+                  </Text>
+                </View>
+              )}
+              {!!menuItem.calories && (
+                <View style={styles.metaInfoPill}>
+                  <Ionicons name="flame-outline" size={13} color="#475569" />
+                  <Text style={styles.metaInfoPillText}>{menuItem.calories} kcal</Text>
+                </View>
+              )}
+            </View>
+
             <View style={styles.titleSection}>
               <Text style={styles.title}>{menuItem.name}</Text>
-              {menuItem.discounted_price ? (
+              {menuItem.discounted_price && menuItem.discounted_price < menuItem.price ? (
                 <View style={styles.priceSection}>
                   <Text style={styles.originalPrice}>R{menuItem.price.toFixed(2)}</Text>
-                  <Text style={styles.price}>R{finalPrice.toFixed(2)}</Text>
+                  <Text style={styles.price}>R{basePrice.toFixed(2)}</Text>
                 </View>
               ) : (
-                <Text style={styles.price}>R{finalPrice.toFixed(2)}</Text>
+                <Text style={styles.price}>R{basePrice.toFixed(2)}</Text>
               )}
             </View>
 
@@ -311,11 +440,9 @@ export default function MenuItemDetailScreen() {
             {ratingValue != null && !Number.isNaN(ratingValue) && (
               <View style={styles.ratingContainer}>
                 <Ionicons name="star" size={16} color="#FFD700" />
-                <Text style={styles.ratingText}>
-                  {ratingValue.toFixed(1)}
-                </Text>
+                <Text style={styles.ratingText}>{ratingValue.toFixed(1)}</Text>
                 <Text style={styles.ratingsCount}>
-                  ({restaurant.total_ratings || 0} reviews)
+                  ({restaurant?.total_ratings || 0} reviews)
                 </Text>
               </View>
             )}
@@ -325,7 +452,9 @@ export default function MenuItemDetailScreen() {
           {restaurant && (
             <TouchableOpacity
               style={styles.restaurantCard}
-              onPress={() => router.push(`/(customer)/home/restaurant-details?id=${restaurantId}`)}
+              onPress={() =>
+                router.push(`/(customer)/home/restaurant-details?id=${restaurantId}`)
+              }
             >
               {restaurant.logo_url && (
                 <Image
@@ -346,10 +475,107 @@ export default function MenuItemDetailScreen() {
           )}
 
           {/* Description */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>About</Text>
-            <Text style={styles.description}>{menuItem.description}</Text>
-          </View>
+          {!!menuItem.description && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>About</Text>
+              <Text style={styles.description}>{menuItem.description}</Text>
+            </View>
+          )}
+
+          {/* Customizations & Option Groups */}
+          {customizationGroups.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Customize Your Item</Text>
+              {customizationGroups.map((group) => {
+                const pickedList = selectedCustomizations[group.name] || [];
+                return (
+                  <View key={group.id} style={styles.custGroupCard}>
+                    <View style={styles.custGroupHeader}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.custGroupTitle}>{group.name}</Text>
+                        <Text style={styles.custGroupSub}>
+                          {group.type === 'multiple'
+                            ? `Choose up to ${group.max_select}`
+                            : 'Select 1 option'}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.reqBadge,
+                          group.required
+                            ? styles.reqBadgeRequired
+                            : styles.reqBadgeOptional,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.reqBadgeText,
+                            group.required
+                              ? styles.reqBadgeTextRequired
+                              : styles.reqBadgeTextOptional,
+                          ]}
+                        >
+                          {group.required ? 'Required' : 'Optional'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.custOptionsList}>
+                      {group.options.map((choice) => {
+                        const isSelected = pickedList.some(
+                          (c) => c.name === choice.name
+                        );
+                        return (
+                          <TouchableOpacity
+                            key={choice.id}
+                            style={[
+                              styles.custOptionRow,
+                              isSelected && styles.custOptionRowSelected,
+                            ]}
+                            onPress={() => handleToggleOption(group, choice)}
+                          >
+                            <View style={styles.custOptionLeft}>
+                              <Ionicons
+                                name={
+                                  group.type === 'multiple'
+                                    ? isSelected
+                                      ? 'checkbox'
+                                      : 'square-outline'
+                                    : isSelected
+                                    ? 'radio-button-on'
+                                    : 'radio-button-off'
+                                }
+                                size={20}
+                                color={isSelected ? colors.primary : colors.gray400}
+                              />
+                              <Text
+                                style={[
+                                  styles.custOptionName,
+                                  isSelected && styles.custOptionNameSelected,
+                                ]}
+                              >
+                                {choice.name}
+                              </Text>
+                            </View>
+                            <Text
+                              style={[
+                                styles.custOptionPrice,
+                                isSelected && styles.custOptionNameSelected,
+                              ]}
+                            >
+                              {choice.price > 0
+                                ? `+R${choice.price.toFixed(2)}`
+                                : 'Free'}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
 
           {/* Ingredients */}
           {menuItem.ingredients && menuItem.ingredients.length > 0 && (
@@ -372,7 +598,11 @@ export default function MenuItemDetailScreen() {
               <View style={styles.tagsList}>
                 {menuItem.tags.map((tag, index) => (
                   <View key={index} style={styles.tag}>
-                    <Ionicons name="checkmark-circle" size={14} color={colors.primary} />
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={14}
+                      color={colors.primary}
+                    />
                     <Text style={styles.tagText}>{tag}</Text>
                   </View>
                 ))}
@@ -380,39 +610,18 @@ export default function MenuItemDetailScreen() {
             </View>
           )}
 
-          {/* Special Instructions */}
+          {/* Special Instructions (Cross-Platform TextInput) */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Special Instructions</Text>
-            <View style={styles.inputContainer}>
-              <Text style={styles.placeholderText}>Add any special requests...</Text>
-              <Text
-                style={[styles.instructionsText, { fontStyle: specialInstructions ? 'normal' : 'italic' }]}
-                numberOfLines={3}
-              >
-                {specialInstructions || 'None'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.editButton}
-              onPress={() => {
-                // Simple alert for now - could expand with modal if needed
-                Alert.prompt(
-                  'Special Instructions',
-                  'Add any special requests for this item',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Save',
-                      onPress: (text) => setSpecialInstructions(text || ''),
-                    },
-                  ],
-                  'plain-text',
-                  specialInstructions
-                );
-              }}
-            >
-              <Text style={styles.editButtonText}>Edit</Text>
-            </TouchableOpacity>
+            <TextInput
+              style={styles.instructionsInput}
+              placeholder="Add any special requests (e.g., extra sauce, no onions)..."
+              placeholderTextColor="#999"
+              value={specialInstructions}
+              onChangeText={setSpecialInstructions}
+              multiline
+              maxLength={250}
+            />
           </View>
 
           {/* Quantity Selector */}
@@ -442,13 +651,24 @@ export default function MenuItemDetailScreen() {
       {/* Floating Action Button */}
       <View style={styles.bottomContainer}>
         <View style={styles.totalContainer}>
-          <Text style={styles.totalLabel}>Total:</Text>
+          <View>
+            <Text style={styles.totalLabel}>Total:</Text>
+            {extraOptionsPrice > 0 && (
+              <Text style={styles.extraOptionsHint}>
+                Includes +R{extraOptionsPrice.toFixed(2)} in options
+              </Text>
+            )}
+          </View>
           <Text style={styles.totalPrice}>
-            R{(finalPrice * quantity).toFixed(2)}
+            R{(unitPrice * quantity).toFixed(2)}
           </Text>
         </View>
         <Button
-          title={menuItem.is_available ? 'Add to Cart' : 'Not Available'}
+          title={
+            menuItem.is_available
+              ? `Add to Cart • R${(unitPrice * quantity).toFixed(2)}`
+              : 'Not Available'
+          }
           onPress={handleAddToCart}
           disabled={!menuItem.is_available}
           style={styles.addButton}
@@ -515,7 +735,7 @@ const styles = StyleSheet.create({
   imageContainer: {
     position: 'relative',
     width: '100%',
-    height: 350,
+    height: 320,
     backgroundColor: '#f5f5f5',
     marginBottom: 20,
   },
@@ -571,6 +791,54 @@ const styles = StyleSheet.create({
   },
   headerInfo: {
     marginBottom: 16,
+  },
+  metaBadgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  vegPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  vegPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#166534',
+  },
+  popularPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ffedd5',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  popularPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#9a3412',
+  },
+  metaInfoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  metaInfoPillText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#475569',
   },
   titleSection: {
     marginBottom: 12,
@@ -654,6 +922,89 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 20,
   },
+  custGroupCard: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  custGroupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  custGroupTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  custGroupSub: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  reqBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  reqBadgeRequired: {
+    backgroundColor: '#fef3c7',
+  },
+  reqBadgeOptional: {
+    backgroundColor: '#e5e7eb',
+  },
+  reqBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  reqBadgeTextRequired: {
+    color: '#92400e',
+  },
+  reqBadgeTextOptional: {
+    color: '#4b5563',
+  },
+  custOptionsList: {
+    gap: 8,
+  },
+  custOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  custOptionRowSelected: {
+    borderColor: colors.primary,
+    backgroundColor: '#f0fdf4',
+  },
+  custOptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  custOptionName: {
+    fontSize: 14,
+    color: '#1f2937',
+    fontWeight: '500',
+  },
+  custOptionNameSelected: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  custOptionPrice: {
+    fontSize: 13,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
   ingredientsList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -683,31 +1034,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
   },
-  inputContainer: {
+  instructionsInput: {
     backgroundColor: '#f9f9f9',
-    borderRadius: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
     padding: 12,
-    marginBottom: 8,
-    minHeight: 60,
-    justifyContent: 'center',
-  },
-  placeholderText: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 4,
-  },
-  instructionsText: {
+    minHeight: 76,
+    textAlignVertical: 'top',
     fontSize: 14,
-    color: '#333',
-  },
-  editButton: {
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  editButtonText: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
+    color: '#111827',
   },
   quantitySelector: {
     flexDirection: 'row',
@@ -736,7 +1072,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   spacer: {
-    height: 100,
+    height: 120,
   },
   bottomContainer: {
     position: 'absolute',
@@ -760,6 +1096,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     fontWeight: '500',
+  },
+  extraOptionsHint: {
+    fontSize: 11,
+    color: '#6b7280',
+    marginTop: 2,
   },
   totalPrice: {
     fontSize: 18,

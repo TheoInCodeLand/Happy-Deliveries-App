@@ -924,6 +924,41 @@ async function openOrder(orderId) {
   }
 }
 
+function formatSelectedOptionsHtml(rawOptions) {
+  if (!rawOptions) return '';
+  let parsed = rawOptions;
+  if (typeof rawOptions === 'string') {
+    try { parsed = JSON.parse(rawOptions); } catch { return ''; }
+  }
+  if (!parsed || typeof parsed !== 'object') return '';
+
+  const chips = [];
+  Object.entries(parsed).forEach(([groupName, val]) => {
+    if (val == null || val === '') return;
+    if (Array.isArray(val)) {
+      const formattedList = val.map(v => {
+        if (typeof v === 'object' && v !== null) {
+          const price = Number(v.price ?? v.priceDelta ?? 0);
+          return `${escHtml(v.name || v.label || '')}${price > 0 ? ` (+R${fmtMoney(price)})` : ''}`;
+        }
+        return escHtml(String(v));
+      }).filter(Boolean).join(', ');
+      if (formattedList) chips.push(`<strong>${escHtml(groupName)}:</strong> ${formattedList}`);
+    } else if (typeof val === 'object') {
+      const price = Number(val.price ?? val.priceDelta ?? 0);
+      const label = `${escHtml(val.name || val.label || '')}${price > 0 ? ` (+R${fmtMoney(price)})` : ''}`;
+      if (label) chips.push(`<strong>${escHtml(groupName)}:</strong> ${label}`);
+    } else {
+      chips.push(`<strong>${escHtml(groupName)}:</strong> ${escHtml(String(val))}`);
+    }
+  });
+
+  if (!chips.length) return '';
+  return `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">
+    ${chips.map(c => `<span style="font-size:0.75rem;background:hsl(var(--muted));color:hsl(var(--foreground));padding:2px 8px;border-radius:999px;border:1px solid hsl(var(--border));">${c}</span>`).join('')}
+  </div>`;
+}
+
 function renderOrderModal(order, items) {
   document.getElementById('orderModalLabel').textContent =
     `Order #${escHtml(order.order_number || order.id.slice(0,8).toUpperCase())}`;
@@ -945,8 +980,9 @@ function renderOrderModal(order, items) {
           <div style="flex:1">
             <div class="order-item-name">${escHtml(it.item_name)}</div>
             <div class="order-item-qty">× ${it.quantity} @ R${fmtMoney(it.unit_price)}</div>
+            ${formatSelectedOptionsHtml(it.selected_options)}
             ${it.special_instructions
-              ? `<div style="font-size:0.78rem;color:#b45309;margin-top:3px"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><path d="M12 2H2v20h20V10Z"/><path d="m12 12 4 4"/><path d="m16 12-4 4"/></svg>${escHtml(it.special_instructions)}</div>`
+              ? `<div style="font-size:0.78rem;color:#b45309;margin-top:4px"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><path d="M12 2H2v20h20V10Z"/><path d="m12 12 4 4"/><path d="m16 12-4 4"/></svg><strong>Note:</strong> ${escHtml(it.special_instructions)}</div>`
               : ''}
           </div>
           <div class="order-item-price">R${fmtMoney(it.total_price ?? it.unit_price * it.quantity)}</div>

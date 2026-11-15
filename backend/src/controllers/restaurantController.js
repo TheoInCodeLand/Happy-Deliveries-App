@@ -176,7 +176,10 @@ exports.createMenu = async (req, res) => {
 // Get restaurant menus 
 exports.getRestaurantMenus = async (req, res) => {
   try {
-    const menus = await Menu.findByRestaurant(req.params.restaurantId);
+    const includeInactive = req.query.includeInactive === 'true';
+    const menus = await Menu.findByRestaurant(req.params.restaurantId, {
+      onlyActive: !includeInactive
+    });
     
     res.json({
       success: true,
